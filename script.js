@@ -10,6 +10,17 @@ let updateTimeTimeout = null;
 let currentStatusFilter = 'all';
 let currentBudgetFilter = 'all';
 let loadedTabs = new Set();
+let lastScrollTop = 0;
+window.addEventListener("scroll", function () {
+  const header = document.querySelector(".mobile-header");
+  let st = window.pageYOffset || document.documentElement.scrollTop;
+  if (st > lastScrollTop && st > 50) {
+    header.style.transform = "translateY(-100%)"; // hide
+  } else {
+    header.style.transform = "translateY(0)"; // show
+  }
+  lastScrollTop = st <= 0 ? 0 : st;
+}, false);
 
 const sortModes = [
   { key: 'newest', icon: '📅', text: 'Newest' },
@@ -63,7 +74,7 @@ function getTabFromHash() {
 
 function navigateToTab(tabName, pushState = true) {
   closeMobileMenu();
-  
+
   if (pushState) {
     const newUrl = `${window.location.pathname}#${tabName}`;
     history.pushState({ tab: tabName }, '', newUrl);
@@ -71,12 +82,20 @@ function navigateToTab(tabName, pushState = true) {
 
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-  
+
   const tabElement = document.getElementById(tabName);
   const navElement = document.querySelector(`[href="#${tabName}"]`);
-  
+
   if (tabElement) tabElement.classList.add('active');
   if (navElement) navElement.classList.add('active');
+
+  // ✅ Show mobile search only on grants tab
+  const mobileSearchBar = document.querySelector('.mobile-search-bar');
+  if (tabName === 'grants') {
+    mobileSearchBar.style.display = 'block';
+  } else {
+    mobileSearchBar.style.display = 'none';
+  }
 
   const tabInfo = tabRoutes[tabName];
   if (tabInfo && !loadedTabs.has(tabName)) {
@@ -84,14 +103,12 @@ function navigateToTab(tabName, pushState = true) {
     loadedTabs.add(tabName);
   }
 
-  // Special handling for dashboard tab charts
   if (tabName === 'dashboard' && loadedTabs.has('dashboard')) {
     loadPayoutsChart();
     loadCategoryChart();
     loadZecPriceTrend();
   }
 
-  // Dynamic browser tab title
   const tabTitles = {
     'dashboard': 'Dashboard',
     'grants': 'Grants',
