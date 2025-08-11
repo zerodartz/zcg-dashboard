@@ -89,10 +89,9 @@ function navigateToTab(tabName, pushState = true) {
   if (tabElement) tabElement.classList.add('active');
   if (navElement) navElement.classList.add('active');
 
-  // ✅ Show mobile search only on grants tab
+  // ✅ Show mobile search bar only on Grants page AND only on mobile
   const mobileSearchBar = document.querySelector('.mobile-search-bar');
-  const isMobile = window.innerWidth <= 768;
-  if (isMobile && tabName === 'grants') {
+  if (window.innerWidth <= 768 && tabName === 'grants') {
     mobileSearchBar.style.display = 'block';
   } else {
     mobileSearchBar.style.display = 'none';
