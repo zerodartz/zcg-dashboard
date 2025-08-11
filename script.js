@@ -219,7 +219,19 @@ const formatZEC = (num) =>
 function cycleSortMode() {
   currentSortMode = (currentSortMode + 1) % 4;
   const mode = sortModes[currentSortMode];
-  document.getElementById('sortBtn').innerHTML = `${mode.icon} ${mode.text}`;
+
+  // ✅ Update desktop sort button
+  const desktopSortBtn = document.getElementById('sortBtn');
+  if (desktopSortBtn) {
+    desktopSortBtn.innerHTML = `${mode.icon} ${mode.text}`;
+  }
+
+  // ✅ Update mobile sort button
+  const mobileSortBtn = document.querySelector('.mobile-filters .sort-btn');
+  if (mobileSortBtn) {
+    mobileSortBtn.innerHTML = `${mode.icon} ${mode.text}`;
+  }
+
   sortGrants();
 }
 
