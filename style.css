@@ -615,8 +615,10 @@ a:hover { color: var(--text-primary); }
   .liquidity-cards {
     flex-direction: column;
   }
+  #grants .grants-header {
+    display: none;
+  }
 }
-
 /* ===== Stipends Chart Styling ===== */
 .stipends-cards {
   display: flex;
