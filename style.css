@@ -57,15 +57,17 @@ a:hover { color: var(--text-primary); }
 /* ===== Mobile Header ===== */
 .mobile-header {
   display: none;
+  width: 100%;
   justify-content: space-between;
   align-items: center;
   padding: 15px 20px;
   background: var(--bg-secondary);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border-color);
-  position: sticky;
+  position: static;
   top: 0;
   z-index: 100;
+  transition: transform 0.3s ease;
 }
 .hamburger {
   display: flex;
@@ -833,7 +835,7 @@ a:hover { color: var(--text-primary); }
   right: 0;    /* ✅ align to right edge */
   display: none;
   position: fixed;
-  bottom: 8px;
+  bottom: 0px;
   background: var(--bg-secondary);
   backdrop-filter: blur(20px);
   border-top: 1px solid var(--border-color);
@@ -845,20 +847,22 @@ a:hover { color: var(--text-primary); }
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  margin-top: 18px;
-  padding-bottom: 8px;
-  margin-bottom: 12px;
+  margin-top: 8px;
 }
 .mobile-filters .pill {
-  padding: 8px 12px 8px 12px;
-  font-size: 0.75rem;
+  padding: 2px 10px;
+  font-size: 0.7rem;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px; /* adjust if needed */
 }
 .mobile-search-input {
   width: 90%;
-  padding: 12px;
-  margin-left: 24px;
-  margin-right: 24px;
+  padding: 10px;
+  margin-left: 14px;
+  margin-right: 20px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--bg-tertiary);
@@ -917,8 +921,7 @@ a:hover { color: var(--text-primary); }
   .main-content {
     width: 100%;
     padding: 20px;
-    padding-bottom: 160px;
-    margin-top: 60px;
+    padding-bottom: 80px;
   }
   .search-container { display: none; }
   .mobile-search-bar { display: block; }
