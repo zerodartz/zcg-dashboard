@@ -841,7 +841,7 @@ a:hover { color: var(--text-primary); }
   width: 100%; /* ✅ full width */
   left: 0;     /* ✅ align to left edge */
   right: 0;    /* ✅ align to right edge */
-  display: none !important; 
+  display: none; 
   position: fixed;
   bottom: 0px;
   background: var(--bg-secondary);
@@ -932,7 +932,6 @@ a:hover { color: var(--text-primary); }
     padding-bottom: 80px;
   }
   .search-container { display: none; }
-  .mobile-search-bar { display: block !important; }
   .view-toggle { display: none !important; }
   .grants-grid { grid-template-columns: 1fr !important; }
   .filter-pills { justify-content: center; }
