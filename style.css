@@ -672,6 +672,9 @@ a:hover { color: var(--text-primary); }
   max-width: 100%;
   height: auto !important;
 }
+  .metric-number {
+    font-size: 1.3rem;
+  }
 .chart-container {
   position: relative;
   height: 350px;
@@ -838,7 +841,7 @@ a:hover { color: var(--text-primary); }
   width: 100%; /* ✅ full width */
   left: 0;     /* ✅ align to left edge */
   right: 0;    /* ✅ align to right edge */
-  display: none;
+  display: none !important; 
   position: fixed;
   bottom: 0px;
   background: var(--bg-secondary);
@@ -929,7 +932,7 @@ a:hover { color: var(--text-primary); }
     padding-bottom: 80px;
   }
   .search-container { display: none; }
-  .mobile-search-bar { display: block; }
+  .mobile-search-bar { display: block !important; }
   .view-toggle { display: none !important; }
   .grants-grid { grid-template-columns: 1fr !important; }
   .filter-pills { justify-content: center; }
