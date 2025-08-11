@@ -91,7 +91,8 @@ function navigateToTab(tabName, pushState = true) {
 
   // ✅ Show mobile search only on grants tab
   const mobileSearchBar = document.querySelector('.mobile-search-bar');
-  if (tabName === 'grants') {
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile && tabName === 'grants') {
     mobileSearchBar.style.display = 'block';
   } else {
     mobileSearchBar.style.display = 'none';
