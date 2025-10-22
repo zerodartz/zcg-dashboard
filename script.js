@@ -705,7 +705,6 @@ async function loadOverview() {
         updateLastUpdateTime();
       }
     }
-
     // Extract values
     const valApproved = getValue("Total USD value of grants approved");
     const valPaidOut = getValue("USD value of grant milestones paid out so far");
@@ -720,19 +719,17 @@ async function loadOverview() {
     const valDev1 = getValue("ZEC accrued from 1st Dev Fund");
     const valDev2 = getValue("ZEC accrued from 2nd Dev Fund");
 
-    // USD row
     const usdCards = [
       { label: "Approved Grants", value: formatUSDInt(valApproved) },
       { label: "Paid Out in USD", value: formatUSDInt(valPaidOut) },
       { label: "USD Balance", value: formatUSDInt(valUsdBal) },
-      { label: "USD Reserves", value: formatUSDInt(valUsdReserves) },
+      { label: "Extra Hedged USD", value: formatUSDInt(valUsdReserves) },
       { label: "Value of ZEC Balance", value: formatUSDInt(valZecBalUsd) },
       {
         label: "Future Liabilities",
         value: `${formatUSDInt(valFuture)}<br><span style="font-size:0.8rem; color:var(--text-tertiary); font-style:italic;">Unhedged: ${formatUSDInt(valUnhedged)}</span>`
       }
     ];
-
     // ZEC row
     const zecCards = [
       {
@@ -752,7 +749,6 @@ async function loadOverview() {
         value: (Number(cleanNumber(valDev2)) || 0).toLocaleString()
       },
       { label: "ZEC Price USD", value: formatZecPrice(valZecPrice) }
-      // Optional: add Paid Out in ZEC (YTD) here if you compute it
     ];
 
     // Render once
