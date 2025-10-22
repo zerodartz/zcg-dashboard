@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Zcash Community Grants Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <link rel="stylesheet" href="style.css">
@@ -42,7 +43,7 @@
         <li class="nav-item"><a class="nav-link" href="#dashboard">Dashboard</a></li>
         <li class="nav-item"><a class="nav-link" href="#grants">Grants</a></li>
         <li class="nav-item"><a class="nav-link" href="#payments">Payments</a></li>
-        <li class="nav-item"><a class="nav-link" href="#audit-payments">Audit Payments</a></li>
+        <li class="nav-item"><a class="nav-link" href="#auditpayments">Audit Payments</a></li>
         <li class="nav-item"><a class="nav-link" href="#liquidity">Maya Liquidity</a></li>
         <li class="nav-item"><a class="nav-link" href="#stipends">Stipends</a></li>
         <li class="nav-item"><a class="nav-link" href="#notetaker">Notetaker Payments</a></li>
@@ -60,16 +61,26 @@
     <!-- Dashboard Tab -->
     <div id="dashboard" class="tab-content">
       <div class="content-header">
-        <h2 class="content-title">Dashboard</h2>
-        <p class="content-subtitle">ZCG statistics</p>
+        <h2 class="content-title">ZCG statistics</h2>
       </div>
-      <div class="metrics-grid" id="overviewMetrics">
-        <div class="loading">Loading metrics...</div>
+      <div class="content-header">
+        <p class="content-subtitle">USD Data</p>
+      </div>      
+<div class="metrics-grid" id="usdMetrics"><div class="loading">Loading USD...</div></div>
+<div class="content-header">
+  <p class="content-subtitle">ZEC Data</p>
+</div>      
+<div class="metrics-grid" id="zecMetrics" style="margin-top: 16px;"><div class="loading">Loading ZEC...</div></div>
+<div class="content-header">
+  <p class="content-subtitle">Grants statistics</p>
+</div>      
+<div class="metrics-grid" id="activityMetrics">
+        <div class="loading">Loading statistics...</div>
       </div>
       <div class="charts-grid">
         <div class="chart-card">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 class="chart-title" style="margin: 0;">Payouts & Milestones</h3>
+            <h3 class="chart-title" style="margin: 0;">Payouts & Milestones/month</h3>
             <div class="filter-pills" id="timeFilters">
               <div class="pill" onclick="filterPayoutsByTime('1m')">1m</div>
               <div class="pill" onclick="filterPayoutsByTime('3m')">3m</div>
@@ -83,9 +94,24 @@
           </div>
         </div>
         <div class="chart-card">
-          <h3 class="chart-title">Grant Categories</h3>
+          <h3 class="chart-title">Grant Categories All Time</h3>
           <div class="chart-container">
             <canvas id="categoryChart"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 class="chart-title" id="approvedTitle">Approved Grants/month</h3>
+            <div class="filter-pills" id="approvedTimeFilters">
+              <div class="pill" data-range="1m">1m</div>
+              <div class="pill" data-range="3m">3m</div>
+              <div class="pill" data-range="1y">1y</div>
+              <div class="pill active" data-range="ytd">YTD</div>
+              <div class="pill" data-range="max">Max</div>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="approvedChart"></canvas>
           </div>
         </div>
         <div class="chart-card">
@@ -138,13 +164,19 @@
       </div>
       <div class="chart-card">
         <div class="chart-header">
-          <h3 class="chart-title">Total Paid Out to Date</h3>
-          <div class="filter-pills" id="paidOutFilters">
-            <div class="pill active" data-range="all">All</div>
-            <div class="pill" data-range="small">&lt;50k</div>
-            <div class="pill" data-range="medium">50-200k</div>
-            <div class="pill" data-range="large">200k+</div>
+          <h3 class="chart-title" id="paidOutTitle">Total Paid Out</h3>
+          <div class="filter-pills" id="paymentsTimeFilters">
+            <div class="pill" data-range="1m">1m</div>
+            <div class="pill" data-range="3m">3m</div>
+            <div class="pill" data-range="ytd">YTD</div>
+            <div class="pill active" data-range="max">Max</div>
           </div>
+        </div>
+        <div class="filter-pills" id="paidOutFilters" style="margin-bottom: 8px;">
+          <div class="pill active" data-range="all">All</div>
+          <div class="pill" data-range="small">&lt;50k</div>
+          <div class="pill" data-range="medium">50-200k</div>
+          <div class="pill" data-range="large">200k+</div>
         </div>
         <div class="chart-container">
           <canvas id="paidOutChart"></canvas>
@@ -168,7 +200,7 @@
     </div>
 
     <!-- Audit Payments Tab -->
-    <div id="audit-payments" class="tab-content">
+    <div id="auditpayments" class="tab-content">
       <div class="content-header">
         <h2 class="content-title">Audit Payments</h2>
         <p class="content-subtitle">Independent contractor payments</p>
