@@ -249,7 +249,9 @@ a:hover { color: var(--text-primary); }
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  margin-bottom: 18px;
 }
+
 .budget-pills {
   display: flex;
   gap: 10px;
@@ -615,10 +617,11 @@ a:hover { color: var(--text-primary); }
 }
 .grant-status {
   display: inline-block;
-  padding: 4px 10px;
+  padding: 4px 8px;
+  margin: 4px 4px 4px 0px;
   border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 500;
   white-space: nowrap;
 }
 .grant-status.completed { background: rgba(40, 167, 69, 0.2); color: #13872e; }
@@ -1267,10 +1270,10 @@ a:hover { color: var(--text-primary); }
 
 /* Tighten chip to match row height a bit more */
 .grant-status {
-  padding: 3px 10px;
+  padding: 4px 8px;
   border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
 @media (max-width: 520px) {
@@ -1289,4 +1292,23 @@ a:hover { color: var(--text-primary); }
 
 #payments .chart-header .filter-pills {
   gap: 6px;
+}
+
+/* Category pill (cards + modal) */
+.category-pill {
+  display: inline-flex;
+  align-items: center;
+  display: inline-block;
+  padding: 4px 8px;
+  margin: 4px 4px 4px 0px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  background: var(--bg-primary);
+}
+.modal-stats-row .category-pill {
+  margin: 0 6px;
 }
