@@ -19,6 +19,7 @@ let currentStatusFilter = "all";
 let currentBudgetFilter = "all";
 let loadedTabs = new Set();
 let lastScrollTop = 0;
+let currentCategoryFilter = "all";
 
 window.addEventListener(
   "scroll",
@@ -41,6 +42,23 @@ const sortModes = [
   { key: "biggest", icon: "💰", text: "Biggest" },
   { key: "smallest", icon: "💰", text: "Smallest" }
 ];
+
+function getHeaderMap(rows) {
+  // Build a normalization map from exact header to normalized name
+  const aoa = sheetToAoA(SHEETS.GRANTS_ZCG);
+  const headerRow = aoa[0] || [];
+  const map = {};
+  headerRow.forEach((h) => {
+    const k = (h || "")
+      .toString()
+      .replace(/\u00A0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    map[k] = h; // normalized => actual header name
+  });
+  return map;
+}
 
 /* ===== Tab Routes ===== */
 const tabRoutes = {
@@ -502,11 +520,16 @@ function sortGrants() {
 function filterGrantsBySearch(query) {
   if (!allGrants.length) return;
 
-  let searchFiltered = allGrants.filter(
-    (grant) =>
+  query = (query || "").toLowerCase();
+
+  let searchFiltered = allGrants.filter((grant) => {
+    const cat = (grant.category || "").toLowerCase();
+    return (
       grant.project.toLowerCase().includes(query) ||
-      grant.grantee.toLowerCase().includes(query)
-  );
+      grant.grantee.toLowerCase().includes(query) ||
+      cat.includes(query) // NEW: category is searchable
+    );
+  });
 
   if (currentStatusFilter !== "all") {
     searchFiltered = searchFiltered.filter((g) => g.status === currentStatusFilter);
@@ -526,6 +549,7 @@ function filterGrantsBySearch(query) {
       break;
   }
 
+  // Category filter will still be applied in applyFilters() when user clicks a category pill
   filteredGrants = searchFiltered;
   sortGrants();
 }
@@ -594,6 +618,13 @@ function applyFilters() {
       break;
   }
 
+  if (currentCategoryFilter !== "all") {
+    const catNorm = currentCategoryFilter.toLowerCase();
+    filtered = filtered.filter(
+      (g) => (g.category || "").toLowerCase() === catNorm
+    );
+  }
+
   filteredGrants = filtered;
   sortGrants();
 }
@@ -633,6 +664,7 @@ function renderGrants(grants) {
         </div>
         <div class="grant-grantee">${esc(grant.grantee)}</div>
         <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
+         ${grant.category ? `<div class="category-pill">${esc(grant.category)}</div>` : ``}
         <div class="grant-status ${grant.status}">
           ${grant.status.replace("-", " ").toUpperCase()} 
           (${grant.completedMilestones}/${grant.totalMilestones})
@@ -1205,6 +1237,20 @@ const githubIssueCache = {};
 async function loadGrants() {
   try {
     await loadWorkbook();
+
+    // Build a header map to safely find the category header regardless of spaces/NBSPs
+    const aoa = sheetToAoA(SHEETS.GRANTS_ZCG);
+    if (!aoa.length) {
+      document.getElementById("grantsContainer").innerHTML =
+        '<div class="loading">Error loading grants data</div>';
+      return;
+    }
+    const headers = (aoa[0] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
+    const headerNorm = headers.map((h) => h.replace(/\s+/g, " ").toLowerCase());
+    const idxCategory = headerNorm.indexOf("category (as determined by zcg)");
+    const categoryHeader = idxCategory >= 0 ? headers[idxCategory] : "Category (as determined by ZCG)";
+
+    // Now read rows as objects
     const rows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
 
     const projectMap = {};
@@ -1222,8 +1268,15 @@ async function loadGrants() {
           totalAmount: 0,
           paidAmount: 0,
           milestones: [],
-          lastPaidDate: null
+          lastPaidDate: null,
+          category: "" // safe default
         };
+      }
+
+      // Capture category once (prefer first non-empty)
+      const cat = (row[categoryHeader] || "").toString().replace(/\u00A0/g, " ").trim();
+      if (cat && !projectMap[key].category) {
+        projectMap[key].category = cat;
       }
 
       const amount = cleanNumber(row["Amount (USD)"]);
@@ -1243,7 +1296,7 @@ async function loadGrants() {
         paidDate: row["Paid Out"],
         estimate: row["Estimate"]
       });
-    }); // <-- close forEach properly
+    });
 
     allGrants = Object.values(projectMap).map((grant) => {
       const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
@@ -1254,17 +1307,52 @@ async function loadGrants() {
       else if (completedMilestones > 0) status = "in-progress";
       else status = "waiting";
 
-      return { ...grant, status, completedMilestones, totalMilestones };
+      return { ...grant, status, completedMilestones, totalMilestones, category: grant.category || "" };
     });
 
     filteredGrants = [...allGrants];
     sortGrants();
+    setupCategoryFilters();
   } catch (error) {
     console.error("Error in loadGrants:", error);
     document.getElementById("grantsContainer").innerHTML =
       '<div class="loading">Error loading grants data</div>';
   }
-} // <-- close function
+}
+
+// Build category pills dynamically from allGrants
+function setupCategoryFilters() {
+  const container = document.getElementById("categoryFilters");
+  if (!container) return;
+
+  const cats = Array.from(
+    new Set(
+      allGrants
+        .map((g) => (g.category || "").replace(/\u00A0/g, " ").trim())
+        .filter((c) => c)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  const base = `<div class="pill ${currentCategoryFilter === "all" ? "active" : ""}" data-cat="all">All Categories</div>`;
+  const pills = cats
+    .map(
+      (c) =>
+        `<div class="pill ${currentCategoryFilter === c ? "active" : ""}" data-cat="${c}">${c}</div>`
+    )
+    .join("");
+
+  container.innerHTML = base + pills;
+
+  container.querySelectorAll(".pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      container.querySelectorAll(".pill").forEach((p) => p.classList.remove("active"));
+      pill.classList.add("active");
+      currentCategoryFilter = pill.dataset.cat || "all";
+      applyFilters();
+    });
+  });
+}
+
 /* ===== Modal ===== */
 function openModal(content) {
   document.getElementById("modalBody").innerHTML = content;
@@ -1410,15 +1498,14 @@ let content = `
   </div>
 
   <div class="modal-stats-row">
-    <span class="stat-sep">•</span>
     <span><strong>Budget:</strong> ${formatUSD(grant.paidAmount)} / ${formatUSD(grant.totalAmount)}</span>
-    ${grant.lastPaidDate ? `<span class="stat-sep">•</span><span><strong>Last Payment:</strong> ${fmtDateCell(grant.lastPaidDate)}</span>` : ""}
-    <span class="stat-sep">•</span>
+    ${grant.lastPaidDate ? `<span><strong>Last Payment:</strong> ${fmtDateCell(grant.lastPaidDate)}</span>` : ""}
     <span><strong>Milestones:</strong> ${grant.completedMilestones}/${grant.totalMilestones} completed</span>
-  <span class="grant-status ${grant.status}">
+    ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
+    <span class="grant-status ${grant.status}">
       ${grant.status.replace("-", " ").toUpperCase()}
     </span>
-    </div>
+  </div>
 
   <div id="githubSection" style="margin-bottom: 20px;">
     <div style="color: var(--text-tertiary); font-size: 0.85rem;">Loading GitHub details...</div>
