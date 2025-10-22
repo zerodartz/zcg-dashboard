@@ -131,6 +131,7 @@
       </div>
       <div class="grants-header">
         <div class="filter-pills">
+          
           <div class="pill active" onclick="filterGrants('all')">All</div>
           <div class="pill" onclick="filterGrants('completed')">Completed</div>
           <div class="pill" onclick="filterGrants('in-progress')">In Progress</div>
@@ -143,6 +144,7 @@
             <div class="pill" onclick="filterGrantsByBudget('medium')">50-200k</div>
             <div class="pill" onclick="filterGrantsByBudget('large')">200k+</div>
           </div>
+          
           <button class="sort-btn" onclick="cycleSortMode()" id="sortBtn">📅 Newest</button>
           <div class="view-toggle">
             <button class="view-btn active" onclick="toggleView('grid')">⊞</button>
@@ -151,6 +153,10 @@
         </div>
       </div>
       <div class="grants-counter" id="grantsCounter">Loading...</div>
+      <div class="filter-pills" id="categoryFilters">
+        <div class="pill active" data-cat="all">All Categories</div>
+        <!-- JS inserts dynamic category pills here -->
+      </div>
       <div class="grants-grid" id="grantsContainer">
         <div class="loading">Loading grants data...</div>
       </div>
