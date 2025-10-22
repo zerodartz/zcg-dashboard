@@ -2579,7 +2579,6 @@ async function loadICPayouts() {
         <th>Recipient</th>
         <th>Amount USD</th>
         <th>ZEC</th>
-        <th>ZEC/USD</th>
         <th>Date</th>
       </tr>`;
 
@@ -2589,7 +2588,6 @@ async function loadICPayouts() {
         <td>${r["Independent Contractor (IC)"] || ""}</td>
         <td>${formatUSD(cleanNumber(r["Amount (USD)"]))}</td>
         <td>${formatZEC(cleanNumber(r["ZEC Disbursed"]))}</td>
-        <td>${r["ZEC/USD"] || ""}</td>
         <td>${fmtDateCell(r["Paid Out"])}</td>
       </tr>`;
     });
@@ -2600,7 +2598,6 @@ async function loadICPayouts() {
         <td colspan="2">Total</td>
         <td>${formatUSD(totalUSD)}</td>
         <td>${formatZEC(totalZEC)}</td>
-        <td>${avgZecUsdWeighted ? `AVG price: ${avgZecUsdWeighted.toFixed(2)}` : ""}</td>
         <td></td>
       </tr>
     </table>`;
