@@ -71,6 +71,12 @@ const tabRoutes = {
   notetaker: { id: "notetaker", load: loadNotetaker }
 };
 
+function jumpToGrantsTab() {
+  if (location.hash !== "#grants") {
+    navigateToTab("grants", true);
+  }
+}
+
 /* ===== Router Functions ===== */
 function initRouter() {
   const initialTab = getTabFromHash();
@@ -259,8 +265,12 @@ function setupSearch() {
   const mobileSearch = document.getElementById("mobileSearch");
 
   [desktopSearch, mobileSearch].forEach((input) => {
+    input.addEventListener("focus", () => {
+      // Go to grants tab when user focuses the search
+      jumpToGrantsTab();
+    });
     input.addEventListener("input", (e) => {
-      const query = e.target.value.toLowerCase();
+      const query = (e.target.value || "").toLowerCase();
       if (input === desktopSearch) mobileSearch.value = query;
       if (input === mobileSearch) desktopSearch.value = query;
       filterGrantsBySearch(query);
@@ -368,7 +378,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 const XLSX_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQjvlcY_B0KRIKMaeq1d8T7rsq_zRshEs9N9YjyKW5jfgim90PSMVfwfKTpnISFZX8kRiyPO56-Ve3h/pub?output=xlsx";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTv_vQ0o3hFVs4fGkOJSQjHAxB5ZFMQc8y-wFJ6oOChFzO_JwxzmpBSWdLLeSQbVoPhJutPxI_KADau/pub?output=xlsx";
 
 let workbook = null;
 
@@ -404,6 +414,24 @@ function sheetToAoA(name, opts = {}) {
     raw: true,
     ...opts
   });
+}
+
+function buildProjectSubmissionDates() {
+  // Read All Grants (AoA) — A=Date, B=Proposal Title
+  const aoa = sheetToAoA(SHEETS.ALL_GRANTS);
+  const map = {}; // norm(title) -> earliest Date
+  for (let i = 1; i < aoa.length; i++) {
+    const row = aoa[i];
+    if (!row) continue;
+    const d = toDate(row[0]);
+    const title = (row[1] || "").toString().trim();
+    if (!title || !d) continue;
+    const k = title.toLowerCase().replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+    const prev = map[k];
+    // Keep the earliest submission date
+    if (!prev || d < prev) map[k] = d;
+  }
+  return map;
 }
 
 // Objects using a particular header row
@@ -663,6 +691,7 @@ function renderGrants(grants) {
           <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
         </div>
         <div class="grant-grantee">${esc(grant.grantee)}</div>
+        ${grant.submissionDate ? `<div class="grant-date">Opened: ${new Date(grant.submissionDate).toLocaleDateString()}</div>` : ""}
         <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
          ${grant.category ? `<div class="category-pill">${esc(grant.category)}</div>` : ``}
         <div class="grant-status ${grant.status}">
@@ -723,12 +752,10 @@ async function loadOverview() {
       { label: "Approved Grants", value: formatUSDInt(valApproved) },
       { label: "Paid Out in USD", value: formatUSDInt(valPaidOut) },
       { label: "USD Balance", value: formatUSDInt(valUsdBal) },
+      { label: "Future Liabilities", value: formatUSDInt(valFuture) },
       { label: "Extra Hedged USD", value: formatUSDInt(valUsdReserves) },
-      { label: "Value of ZEC Balance", value: formatUSDInt(valZecBalUsd) },
-      {
-        label: "Future Liabilities",
-        value: `${formatUSDInt(valFuture)}<br><span style="font-size:0.8rem; color:var(--text-tertiary); font-style:italic;">Unhedged: ${formatUSDInt(valUnhedged)}</span>`
-      }
+      { label: "Unhedged USD", value: formatUSDInt(valUnhedged) },
+      { label: "Value of ZEC Balance", value: formatUSDInt(valZecBalUsd) }
     ];
     // ZEC row
     const zecCards = [
@@ -1062,6 +1089,7 @@ async function loadPayoutsChart() {
           y1: {
             type: "linear",
             position: "left",
+            title: { display: true, text: "Milestones (count)" },
             beginAtZero: true,
             grid: {
               color: getComputedStyle(document.documentElement)
@@ -1077,6 +1105,7 @@ async function loadPayoutsChart() {
           y2: {
             type: "linear",
             position: "right",
+            title: { display: true, text: "USD" },
             grid: { drawOnChartArea: false },
             ticks: {
               color: getComputedStyle(document.documentElement)
@@ -1185,12 +1214,12 @@ async function loadCategoryChart() {
 async function loadZecPriceTrend() {
   try {
     const res = await fetch(
-      "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=30"
+      "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=90"
     );
     const data = await res.json();
 
     const filtered = data.prices.filter((_, i) => i % 24 === 0);
-    const furtherFiltered = filtered.filter((_, i) => i % 3 === 0);
+    const furtherFiltered = filtered.filter((_, i) => i % 1 === 0);
     const prices = furtherFiltered.map((p) => ({ date: new Date(p[0]), price: p[1] }));
 
     const ctx = document.getElementById("zecPriceChart");
@@ -1234,7 +1263,7 @@ async function loadGrants() {
   try {
     await loadWorkbook();
 
-    // Build a header map to safely find the category header regardless of spaces/NBSPs
+    // Find category header robustly (keep your existing logic here)
     const aoa = sheetToAoA(SHEETS.GRANTS_ZCG);
     if (!aoa.length) {
       document.getElementById("grantsContainer").innerHTML =
@@ -1246,12 +1275,15 @@ async function loadGrants() {
     const idxCategory = headerNorm.indexOf("category (as determined by zcg)");
     const categoryHeader = idxCategory >= 0 ? headers[idxCategory] : "Category (as determined by ZCG)";
 
+    // Build Submission Date map from ALL_GRANTS (Proposal Title => earliest Date)
+    const submissionMap = buildProjectSubmissionDates();
+
     // Now read rows as objects
     const rows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
 
     const projectMap = {};
     rows.forEach((row) => {
-      const project = row["Project"];
+      const project = (row["Project"] || "").toString().trim();
       const grantee =
         row["Grantee"] || row["Applicant(s)"] || row["Applicant"] || row["Recipient"];
       if (!project || !grantee) return;
@@ -1265,14 +1297,21 @@ async function loadGrants() {
           paidAmount: 0,
           milestones: [],
           lastPaidDate: null,
-          category: "" // safe default
+          category: "",
+          submissionDate: null // NEW
         };
       }
 
-      // Capture category once (prefer first non-empty)
+      // Category capture
       const cat = (row[categoryHeader] || "").toString().replace(/\u00A0/g, " ").trim();
       if (cat && !projectMap[key].category) {
         projectMap[key].category = cat;
+      }
+
+      // Submission date from ALL_GRANTS using Proposal Title <-> Project exact text match (normalized)
+      if (!projectMap[key].submissionDate) {
+        const k = project.toLowerCase().replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+        if (submissionMap[k]) projectMap[key].submissionDate = submissionMap[k];
       }
 
       const amount = cleanNumber(row["Amount (USD)"]);
@@ -1297,14 +1336,29 @@ async function loadGrants() {
     allGrants = Object.values(projectMap).map((grant) => {
       const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
       const totalMilestones = grant.milestones.length;
-
       let status;
       if (completedMilestones === totalMilestones) status = "completed";
       else if (completedMilestones > 0) status = "in-progress";
       else status = "waiting";
-
-      return { ...grant, status, completedMilestones, totalMilestones, category: grant.category || "" };
+      return {
+        ...grant,
+        status,
+        completedMilestones,
+        totalMilestones,
+        category: grant.category || "",
+        submissionDate: grant.submissionDate || null // keep Date object
+      };
     });
+
+    console.log(
+      "Submission map size",
+      Object.keys(buildProjectSubmissionDates()).length
+    );
+    console.log(
+      "First grant + submission",
+      allGrants[0]?.project,
+      allGrants[0]?.submissionDate
+    );
 
     filteredGrants = [...allGrants];
     sortGrants();
@@ -1315,6 +1369,8 @@ async function loadGrants() {
       '<div class="loading">Error loading grants data</div>';
   }
 }
+
+console.log("Sample grant submission date", allGrants[0]?.project, allGrants[0]?.submissionDate);
 
 // Build category pills dynamically from allGrants
 function setupCategoryFilters() {
@@ -1492,16 +1548,14 @@ let content = `
   <div class="modal-grantee-row">
     <div class="modal-grantee">${grantee}</div>
   </div>
-
-  <div class="modal-stats-row">
-    <span><strong>Budget:</strong> ${formatUSD(grant.paidAmount)} / ${formatUSD(grant.totalAmount)}</span>
-    ${grant.lastPaidDate ? `<span><strong>Last Payment:</strong> ${fmtDateCell(grant.lastPaidDate)}</span>` : ""}
-    <span><strong>Milestones:</strong> ${grant.completedMilestones}/${grant.totalMilestones} completed</span>
-    ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
-    <span class="grant-status ${grant.status}">
-      ${grant.status.replace("-", " ").toUpperCase()}
-    </span>
-  </div>
+<div class="modal-stats-row">
+  ${grant.submissionDate ? `<span><strong>Opened:</strong> ${new Date(grant.submissionDate).toLocaleDateString()}</span>` : ""}
+  <span><strong>Budget:</strong> ${formatUSD(grant.paidAmount)} / ${formatUSD(grant.totalAmount)}</span>
+  ${grant.lastPaidDate ? `<span><strong>Last Payment:</strong> ${fmtDateCell(grant.lastPaidDate)}</span>` : ""}
+  <span><strong>Milestones:</strong> ${grant.completedMilestones}/${grant.totalMilestones} completed</span>
+  ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
+  <span class="grant-status ${grant.status}">${grant.status.replace("-", " ").toUpperCase()}</span>
+</div>
 
   <div id="githubSection" style="margin-bottom: 20px;">
     <div style="color: var(--text-tertiary); font-size: 0.85rem;">Loading GitHub details...</div>
@@ -1693,6 +1747,8 @@ function renderPaidOutChart(data) {
 
   ctx.parentElement.style.height = Math.max(200, data.length * 30) + "px";
 
+  const totalPaid = data.reduce((sum, d) => sum + (d.amount || 0), 0);
+
   ctx.chart = new Chart(ctx, {
     type: "bar",
     data: {
@@ -1710,17 +1766,52 @@ function renderPaidOutChart(data) {
     options: {
       ...getChartOptions(),
       indexAxis: "y",
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function (ctx) {
+              const value = ctx.parsed.x || 0;
+              const pct = totalPaid > 0 ? ((value / totalPaid) * 100).toFixed(1) : "0.0";
+              return `${formatUSD(value)} (${pct}%)`;
+            }
+          }
+        },
+        datalabels: {
+          anchor: "end",
+          align: "right",
+          color: getComputedStyle(document.documentElement)
+            .getPropertyValue("--text-secondary")
+            .trim(),
+          formatter: function (value) {
+            const pct = totalPaid > 0 ? ((value / totalPaid) * 100).toFixed(1) : "0.0";
+            return `${pct}%`;
+          },
+          font: {
+            weight: "600",
+            size: 11
+          },
+          // pad the label slightly so it doesn't overlap the bar edge
+          offset: 4,
+          // show only if > 0
+          display: function (ctx) {
+            const v = ctx.dataset.data[ctx.dataIndex] || 0;
+            return v > 0;
+          }
+        }
+      },
       scales: {
         x: {
           ...getChartOptions().scales.x,
+          title: { display: true, text: "USD" },
           ticks: {
             ...getChartOptions().scales.x.ticks,
             callback: (v) => formatUSD(v)
           }
         }
       }
-    }
+    },
+    plugins: [ChartDataLabels] // Activate the plugin
   });
 }
 
@@ -1731,6 +1822,8 @@ function renderFutureChart(data) {
   if (ctx.chart) ctx.chart.destroy();
 
   ctx.parentElement.style.height = Math.max(200, data.length * 30) + "px";
+
+  const totalFuture = data.reduce((sum, d) => sum + (d.amount || 0), 0);
 
   ctx.chart = new Chart(ctx, {
     type: "bar",
@@ -1749,7 +1842,18 @@ function renderFutureChart(data) {
     options: {
       ...getChartOptions(),
       indexAxis: "y",
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function (ctx) {
+              const value = ctx.parsed.x || 0;
+              const pct = totalFuture > 0 ? ((value / totalFuture) * 100).toFixed(1) : "0.0";
+              return `${formatUSD(value)} (${pct}%)`;
+            }
+          }
+        }
+      },
       scales: {
         x: {
           ...getChartOptions().scales.x,
@@ -1762,6 +1866,8 @@ function renderFutureChart(data) {
     }
   });
 }
+
+console.log(renderPaidOutChart.toString().slice(0, 200));
 
 /* Wire time filters */
 function setupPaymentsTimeFilters() {
@@ -1869,6 +1975,7 @@ async function loadPayouts() {
       }))
       .filter((r) => r.grantee);
 
+      console.log("PaidOut dataset", getPaidOutDataForChart());
     // Initial renders
     renderPaidOutChart(getPaidOutDataForChart());
     renderFutureChart(futureOriginal);
@@ -1917,6 +2024,7 @@ function renderPaidOutChart(data) {
         {
           label: "Total Paid Out (USD)",
           data: data.map((d) => d.amount),
+          title: { display: true, text: "USD" },
           backgroundColor: "rgba(243, 166, 34, 0.7)",
           borderColor: "#f3a622",
           borderWidth: 1
@@ -2105,6 +2213,7 @@ function renderApprovedChartJoined(data) {
         y1: {
           type: "linear",
           position: "left",
+          title: { display: true, text: "Grants (count)" },
           beginAtZero: true,
           grid: { color: getComputedStyle(document.documentElement).getPropertyValue("--grid-color").trim() },
           ticks: { color: getComputedStyle(document.documentElement).getPropertyValue("--text-tertiary").trim() }
@@ -2112,6 +2221,7 @@ function renderApprovedChartJoined(data) {
         y2: {
           type: "linear",
           position: "right",
+          title: { display: true, text: "USD" },
           grid: { drawOnChartArea: false },
           ticks: {
             color: getComputedStyle(document.documentElement).getPropertyValue("--text-tertiary").trim(),
@@ -2464,33 +2574,29 @@ async function loadStipends() {
   }
 }
 
-/* ===== IC Payouts ===== */
-
-function renderAuditPaymentsChart(rows) {
-  const monthlyTotals = {};
-
+/* ===== IC Payouts ===== */function renderAuditPaymentsChart(rows) {
+  // Build monthly totals for USD and ZEC
+  const monthly = {}; // monthKey -> { usd: number, zec: number }
   rows.forEach((r) => {
     const date = toDate(r["Paid Out"]);
     if (!date) return;
 
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
-      2,
-      "0"
-    )}`;
-    const contractor = r["Independent Contractor (IC)"] || "Unknown";
-    const amount = cleanNumber(r["Amount (USD)"]);
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
-    if (!monthlyTotals[monthKey]) {
-      monthlyTotals[monthKey] = { total: 0, contractors: {} };
+    const usd = cleanNumber(r["Amount (USD)"]);
+    const zec = cleanNumber(r["ZEC Disbursed"]);
+
+    if (!monthly[monthKey]) {
+      monthly[monthKey] = { usd: 0, zec: 0 };
     }
-
-    monthlyTotals[monthKey].total += amount;
-    monthlyTotals[monthKey].contractors[contractor] =
-      (monthlyTotals[monthKey].contractors[contractor] || 0) + amount;
+    monthly[monthKey].usd += usd;
+    monthly[monthKey].zec += zec;
   });
 
-  const labels = Object.keys(monthlyTotals).sort();
-  const data = labels.map((m) => monthlyTotals[m].total);
+  // Sort months and map data arrays
+  const labels = Object.keys(monthly).sort();
+  const usdData = labels.map((m) => monthly[m].usd);
+  const zecData = labels.map((m) => monthly[m].zec);
 
   const ctx = document.getElementById("auditPaymentsChart").getContext("2d");
   if (ctx.chart) ctx.chart.destroy();
@@ -2502,28 +2608,72 @@ function renderAuditPaymentsChart(rows) {
       datasets: [
         {
           label: "Total Audit Payments (USD)",
-          data,
-          borderColor: "#f3a622",
+          data: usdData,
+          yAxisID: "yUSD",
+          borderColor: "#4caf50", // green-ish
+          backgroundColor: "rgba(76, 175, 80, 0.2)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointHoverRadius: 5
+        },
+        {
+          label: "Total Audit Payments (ZEC)",
+          data: zecData,
+          yAxisID: "yZEC",
+          borderColor: "#f3a622", // orange
           backgroundColor: "rgba(243, 166, 34, 0.2)",
           fill: true,
-          tension: 0.3
+          tension: 0.3,
+          pointRadius: 3,
+          pointHoverRadius: 5
         }
       ]
     },
     options: {
       ...getChartOptions(),
+      interaction: { mode: "index", intersect: false },
       plugins: {
+        legend: { display: true },
         tooltip: {
           callbacks: {
-            label: function (context) {
-              const month = context.label;
-              const total = formatUSD(monthlyTotals[month].total);
-              const breakdown = Object.entries(monthlyTotals[month].contractors)
-                .map(([name, amt]) => `${name}: ${formatUSD(amt)}`)
-                .join(", ");
-              return `${total} (${breakdown})`;
+            label: function (ctx) {
+              const isZEC = ctx.dataset.yAxisID === "yZEC";
+              const val = ctx.parsed.y || 0;
+              return isZEC
+                ? `${ctx.dataset.label}: ${val.toLocaleString(undefined, { maximumFractionDigits: 2 })} ZEC`
+                : `${ctx.dataset.label}: ${formatUSD(val)}`;
             }
           }
+        }
+      },
+      scales: {
+        yUSD: {
+          type: "linear",
+          position: "left",
+          title: { display: true, text: "USD" },
+          beginAtZero: true,
+          grid: {
+            color: getComputedStyle(document.documentElement).getPropertyValue("--grid-color").trim()
+          },
+          ticks: {
+            color: getComputedStyle(document.documentElement).getPropertyValue("--text-tertiary").trim(),
+            callback: (v) => formatUSD(v)
+          }
+        },
+        yZEC: {
+          type: "linear",
+          position: "right",
+          title: { display: true, text: "ZEC" },
+          grid: { drawOnChartArea: false },
+          beginAtZero: true,
+          ticks: {
+            color: getComputedStyle(document.documentElement).getPropertyValue("--text-tertiary").trim(),
+            callback: (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })
+          }
+        },
+        x: {
+          ...getChartOptions().scales.x
         }
       }
     }
