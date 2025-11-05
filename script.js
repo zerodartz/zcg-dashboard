@@ -378,7 +378,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 const XLSX_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTv_vQ0o3hFVs4fGkOJSQjHAxB5ZFMQc8y-wFJ6oOChFzO_JwxzmpBSWdLLeSQbVoPhJutPxI_KADau/pub?output=xlsx";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTngjiurqNRbaNOWfLNrrq1yU_JUEqDJhyN6cH8Zvmg2fUYzkHNHxVSeX6P1qybmF_x7fnjeBq21kvW/pub?output=xlsx";
 
 let workbook = null;
 
