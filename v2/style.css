@@ -9,6 +9,7 @@
     --zcash-yellow: #F4B728;
     --accent-primary: #F4B728;
     --accent-secondary: #ffd66b;
+    --accent-third: #ffc17c;  /* ADD THIS LINE */
     --success: #10b981;
     --warning: #f59e0b;
     --danger: #ef4444;
@@ -26,6 +27,7 @@
     --text-secondary: #a1a1aa;
     --text-tertiary: #71717a;
     --border: #2a2a2a;
+    --accent-third: #ffc17c;  /* ADD THIS LINE */
     --shadow: rgba(0, 0, 0, 0.3);
     --shadow-md: rgba(0, 0, 0, 0.4);
     --shadow-lg: rgba(0, 0, 0, 0.5);
