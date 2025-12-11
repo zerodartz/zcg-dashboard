@@ -166,12 +166,14 @@
         </div>
         
         <div class="grants-header">
-          <div class="filter-tabs" id="statusFilters">
-            <button class="filter-tab active" data-filter="all">All</button>
-            <button class="filter-tab" data-filter="completed">Completed</button>
-            <button class="filter-tab" data-filter="in-progress">In Progress</button>
-            <button class="filter-tab" data-filter="waiting">Waiting</button>
-          </div>
+            <div class="filter-tabs" id="statusFilters">
+                <button class="filter-tab active" data-filter="all">All</button>
+                <button class="filter-tab" data-filter="completed">Completed</button>
+                <button class="filter-tab" data-filter="in-progress">In Progress</button>
+                <button class="filter-tab" data-filter="waiting">Waiting start</button>
+                <button class="filter-tab" data-filter="discussion">Discussion Required</button>
+                <button class="filter-tab" data-filter="declined">Declined</button>
+              </div>
           
           <div class="grants-controls">
             <div class="filter-tabs" id="budgetFilters">
@@ -301,7 +303,19 @@
         </div>
       </div>
     </main>
-  
+    <footer class="site-footer">
+        <div class="site-footer-inner">
+          <span>Data source:</span>
+          <a
+            id="sheetSourceLink"
+            href="https://docs.google.com/spreadsheets/d/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/edit?usp=sharing"
+            target="_blank"
+            rel="noopener"
+          >
+            ZCG Google Sheets
+          </a>
+        </div>
+      </footer>
     <!-- Bottom Navigation (Mobile) -->
     <nav class="bottom-nav">
       <div class="bottom-nav-content">
@@ -366,13 +380,4 @@
         <div class="modal-body" id="modalBody"></div>
       </div>
     </div>
-  
-    <!-- External Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
-    
-    <!-- Your Script File -->
-    <script src="script.js"></script>
   </body>
