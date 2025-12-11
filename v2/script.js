@@ -39,8 +39,12 @@ const sortModes = [
 ];
 
 /* ===== XLSX Source ===== */
-const XLSX_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/pub?output=xlsx";
+const GOOGLE_SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/edit?usp=sharing";
 
+const XLSX_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/pub?output=xlsx";
+  
 let workbook = null;
 
 const SHEETS = {
@@ -1116,20 +1120,104 @@ async function loadApprovedChart() {
 }
 
 /* ===== GRANTS ===== */
-function buildProjectSubmissionDates() {
-  const aoa = sheetToAoA(SHEETS.ALL_GRANTS);
-  const map = {};
-  for (let i = 1; i < aoa.length; i++) {
-    const row = aoa[i];
-    if (!row) continue;
-    const d = toDate(row[0]);
-    const title = (row[1] || "").toString().trim();
-    if (!title || !d) continue;
-    const k = title.toLowerCase().replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
-    const prev = map[k];
-    if (!prev || d < prev) map[k] = d;
+function getDecisionStatus(rawDecision) {
+    const s = (rawDecision || "")
+      .toString()
+      .replace(/\u00A0/g, " ")
+      .trim()
+      .toLowerCase();
+  
+    if (!s) return "unknown";
+  
+    // Canonical normalized sets
+    if (s.includes("approved")) return "approved";
+  
+    if (
+      s.includes("reject") ||
+      s.includes("decline") ||
+      s === "no" ||
+      s === "not approved"
+    ) {
+      return "rejected";
+    }
+  
+    if (s.includes("withdraw")) return "withdrawn";
+    if (s.includes("filter")) return "filtered";
+  
+    // Discussion / no final decision variants
+    if (
+      s.includes("discussion") ||
+      s.includes("needs more discussion") ||
+      s.includes("needs discussion") ||
+      s.includes("tabled") ||
+      s.includes("pending") ||
+      s.includes("under review") ||
+      s.includes("deferred")
+    ) {
+      return "discussion";
+    }
+  
+    return "unknown";
   }
-  return map;
+
+function buildProjectMetaFromAllGrants() {
+  const aoa = sheetToAoA(SHEETS.ALL_GRANTS);
+  const meta = {};
+
+  if (!aoa.length) return meta;
+
+  const headers = (aoa[0] || []).map((h) =>
+    (h || "").toString().replace(/\u00A0/g, " ").trim()
+  );
+  const normHeaders = headers.map((h) => h.toLowerCase().replace(/\s+/g, " "));
+
+  const colDate = 0; // you already assume date col 0 in several places
+  const colTitle = 1; // title / project name
+  const colDecision = 5; // same as COL_DECISION in loadApprovedChart
+
+  // Try to locate "Forum Link" column
+  const forumIdx =
+    normHeaders.findIndex((h) => h.includes("forum") && h.includes("link")) ??
+    -1;
+
+  for (let i = 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const rawTitle = (row[colTitle] || "").toString().trim();
+    const d = toDate(row[colDate]);
+
+    if (!rawTitle) continue;
+
+    const key = rawTitle
+      .toLowerCase()
+      .replace(/\u00A0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const decisionRaw = row[colDecision];
+    const forumLink =
+      forumIdx >= 0 ? (row[forumIdx] || "").toString().trim() : "";
+
+    const existing = meta[key] || {};
+    // Earliest submission date wins
+    const submissionDate =
+      existing.submissionDate && d
+        ? d < existing.submissionDate
+          ? d
+          : existing.submissionDate
+        : d || existing.submissionDate || null;
+
+    const decisionStatus = getDecisionStatus(
+      decisionRaw != null ? decisionRaw : existing.decisionRaw
+    );
+
+    meta[key] = {
+      submissionDate,
+      decisionStatus,
+      forumLink: forumLink || existing.forumLink || null
+    };
+  }
+
+  return meta;
 }
 
 async function loadGrants() {
@@ -1147,7 +1235,7 @@ async function loadGrants() {
     const idxCategory = headerNorm.indexOf("category (as determined by zcg)");
     const categoryHeader = idxCategory >= 0 ? headers[idxCategory] : "Category (as determined by ZCG)";
 
-    const submissionMap = buildProjectSubmissionDates();
+    const projectMeta = buildProjectMetaFromAllGrants();
 
     const rows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
 
@@ -1159,26 +1247,31 @@ async function loadGrants() {
 
       const key = `${project}_${grantee}`;
       if (!projectMap[key]) {
+        const projectTitle = (row["Project"] || "").toString().trim();
+        const normTitle = projectTitle
+          .toLowerCase()
+          .replace(/\u00A0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const meta = projectMeta[normTitle] || {};
+      
         projectMap[key] = {
-          project,
+          project: projectTitle,
           grantee,
           totalAmount: 0,
           paidAmount: 0,
           milestones: [],
           lastPaidDate: null,
           category: "",
-          submissionDate: null
+          submissionDate: meta.submissionDate || null,
+          decisionStatus: meta.decisionStatus || "unknown",
+          forumLink: meta.forumLink || null
         };
       }
 
       const cat = (row[categoryHeader] || "").toString().replace(/\u00A0/g, " ").trim();
       if (cat && !projectMap[key].category) {
         projectMap[key].category = cat;
-      }
-
-      if (!projectMap[key].submissionDate) {
-        const k = project.toLowerCase().replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
-        if (submissionMap[k]) projectMap[key].submissionDate = submissionMap[k];
       }
 
       const amount = cleanNumber(row["Amount (USD)"]);
@@ -1201,21 +1294,23 @@ async function loadGrants() {
     });
 
     allGrants = Object.values(projectMap).map((grant) => {
-      const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
-      const totalMilestones = grant.milestones.length;
-      let status;
-      if (completedMilestones === totalMilestones) status = "completed";
-      else if (completedMilestones > 0) status = "in-progress";
-      else status = "waiting";
-      return {
-        ...grant,
-        status,
-        completedMilestones,
-        totalMilestones,
-        category: grant.category || "",
-        submissionDate: grant.submissionDate || null
-      };
-    });
+        const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
+        const totalMilestones = grant.milestones.length;
+        let status;
+        if (completedMilestones === totalMilestones) status = "completed";
+        else if (completedMilestones > 0) status = "in-progress";
+        else status = "waiting";
+        return {
+          ...grant,
+          status,
+          completedMilestones,
+          totalMilestones,
+          category: grant.category || "",
+          submissionDate: grant.submissionDate || null,
+          decisionStatus: grant.decisionStatus || "unknown",
+          forumLink: grant.forumLink || null
+        };
+      });
 
     filteredGrants = [...allGrants];
     sortGrants();
@@ -1285,7 +1380,24 @@ function filterGrantsBySearch(query) {
   });
 
   if (currentStatusFilter !== "all") {
-    searchFiltered = searchFiltered.filter((g) => g.status === currentStatusFilter);
+    if (
+      currentStatusFilter === "discussion" ||
+      currentStatusFilter === "declined"
+    ) {
+      searchFiltered = searchFiltered.filter((g) => {
+        if (currentStatusFilter === "discussion") {
+          return g.decisionStatus === "discussion";
+        }
+        if (currentStatusFilter === "declined") {
+          return g.decisionStatus === "rejected";
+        }
+        return false;
+      });
+    } else {
+      searchFiltered = searchFiltered.filter(
+        (g) => g.status === currentStatusFilter
+      );
+    }
   }
 
   switch (currentBudgetFilter) {
@@ -1308,7 +1420,22 @@ function applyFilters() {
   let filtered = [...allGrants];
 
   if (currentStatusFilter !== "all") {
-    filtered = filtered.filter((g) => g.status === currentStatusFilter);
+    if (
+      currentStatusFilter === "discussion" ||
+      currentStatusFilter === "declined"
+    ) {
+      filtered = filtered.filter((g) => {
+        if (currentStatusFilter === "discussion") {
+          return g.decisionStatus === "discussion";
+        }
+        if (currentStatusFilter === "declined") {
+          return g.decisionStatus === "rejected";
+        }
+        return false;
+      });
+    } else {
+      filtered = filtered.filter((g) => g.status === currentStatusFilter);
+    }
   }
 
   switch (currentBudgetFilter) {
@@ -1366,19 +1493,28 @@ function setupCategoryFilters() {
 function renderGrants(grants) {
   const container = document.getElementById("grantsContainer");
   if (!container) return;
-  
+
   updateGrantsCounter(grants.length, allGrants.length);
 
   if (!grants.length) {
-    container.innerHTML = '<div class="loading-placeholder">No grants found</div>';
+    container.innerHTML =
+      '<div class="loading-placeholder">No grants found</div>';
     return;
   }
 
   container.innerHTML = grants
     .map((grant) => {
-      const progressPercent = grant.totalMilestones > 0
-        ? (grant.completedMilestones / grant.totalMilestones) * 100
-        : 0;
+      const progressPercent =
+        grant.totalMilestones > 0
+          ? (grant.completedMilestones / grant.totalMilestones) * 100
+          : 0;
+
+      const decisionLabel =
+        grant.decisionStatus === "discussion"
+          ? "Discussion Required"
+          : grant.decisionStatus === "rejected"
+          ? "Declined"
+          : null;
 
       const esc = (s) =>
         String(s)
@@ -1389,21 +1525,44 @@ function renderGrants(grants) {
           .replace(/'/g, "&#039;");
 
       return `
-      <div class="grant-card ${grant.status}" onclick="showGrantDetails('${esc(grant.project)}', '${esc(grant.grantee)}')">
-        <div class="grant-title">${esc(grant.project)}</div>
-        <div class="progress-bar">
-          <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
-        </div>
-        <div class="grant-grantee">${esc(grant.grantee)}</div>
-        ${grant.submissionDate ? `<div class="grant-date">Opened: ${new Date(grant.submissionDate).toLocaleDateString()}</div>` : ""}
-        <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
-        ${grant.category ? `<div class="category-pill">${esc(grant.category)}</div>` : ``}
-        <div class="grant-status ${grant.status}">
-          ${grant.status.replace("-", " ").toUpperCase()} 
-          (${grant.completedMilestones}/${grant.totalMilestones})
-        </div>
-        <div class="grant-plus-btn"><span>+</span></div>
-      </div>`;
+        <div class="grant-card ${grant.status}" onclick="showGrantDetails('${esc(
+        grant.project
+      )}', '${esc(grant.grantee)}')">
+          <div class="grant-title">${esc(grant.project)}</div>
+          <div class="progress-bar">
+            <div class="progress-fill ${
+              grant.status
+            }" style="width: ${progressPercent}%;"></div>
+          </div>
+          <div class="grant-grantee">${esc(grant.grantee)}</div>
+          ${
+            grant.submissionDate
+              ? `<div class="grant-date">Opened: ${new Date(
+                  grant.submissionDate
+                ).toLocaleDateString()}</div>`
+              : ""
+          }
+          <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
+          ${
+            grant.category
+              ? `<div class="category-pill">${esc(grant.category)}</div>`
+              : ``
+          }
+          <div class="grant-status ${grant.status}">
+            ${grant.status.replace("-", " ").toUpperCase()} 
+            (${grant.completedMilestones}/${grant.totalMilestones})
+          </div>
+          ${
+            decisionLabel
+              ? `<div class="grant-status ${
+                  grant.decisionStatus === "discussion"
+                    ? "discussion"
+                    : "declined"
+                }">Decision: ${decisionLabel.toUpperCase()}</div>`
+              : ""
+          }
+          <div class="grant-plus-btn"><span>+</span></div>
+        </div>`;
     })
     .join("");
 }
@@ -1523,10 +1682,13 @@ async function showGrantDetails(project, grantee) {
   };
 
   let content = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
-      <h2 style="font-size:1.25rem;font-weight:700;margin:0;">${project}</h2>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+    <h2 style="font-size:1.25rem;font-weight:700;margin:0;">${project}</h2>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+      <span id="forumBtnSlot"></span>
       <span id="githubBtnSlot"></span>
     </div>
+  </div>
     <div class="progress-bar" style="margin: 12px 0;">
       <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
     </div>
@@ -1564,6 +1726,14 @@ async function showGrantDetails(project, grantee) {
   const issue = await findGitHubIssueByTitle(grant.project);
   const githubContainer = document.getElementById("githubSection");
   const btnSlot = document.getElementById("githubBtnSlot");
+  const forumSlot = document.getElementById("forumBtnSlot");
+if (forumSlot && grant.forumLink) {
+  forumSlot.innerHTML = `
+    <a class="github-btn" href="${grant.forumLink}" target="_blank" rel="noopener">
+      Forum
+    </a>
+  `;
+}
 
   if (issue) {
     const issueData = await fetchGitHubIssueBody(issue.number);
@@ -1982,134 +2152,219 @@ async function loadLiquidity() {
 }
 
 /* ===== STIPENDS ===== */
-function renderStipendsChart(months, totalUSD, perPersonUSD, zecPerPersonUSD) {
-  const perPersonTotalUSD = totalUSD.map((v) => v / 5);
-
-  const ctx = document.getElementById("stipendsChart");
-  if (!ctx) return;
-  if (ctx.chart) ctx.chart.destroy();
-
-  ctx.chart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: months,
-      datasets: [
-        {
-          label: "Total Stipends (USD)",
-          data: totalUSD,
-          backgroundColor: "rgba(243, 166, 34, 0.7)",
-          borderColor: "#f3a622",
-          borderWidth: 1,
-          yAxisID: "y",
-          order: 4
-        },
-        {
-          label: "USD Portion per Person",
-          data: Array(months.length).fill(perPersonUSD),
-          type: "line",
-          borderColor: "#4caf50",
-          fill: false,
-          yAxisID: "y",
-          tension: 0.3,
-          order: 3
-        },
-        {
-          label: "ZEC Portion per Person (USD)",
-          data: zecPerPersonUSD,
-          type: "line",
-          borderColor: "#2196f3",
-          fill: false,
-          yAxisID: "y",
-          tension: 0.3,
-          order: 2
-        },
-        {
-          label: "Per Person Total USD",
-          data: perPersonTotalUSD,
-          type: "line",
-          borderColor: "#e91e63",
-          fill: false,
-          yAxisID: "y",
-          tension: 0.3,
-          borderDash: [5, 5],
-          order: 1
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        y: {
-          beginAtZero: true,
-          title: { display: true, text: "USD" }
-        }
-      }
-    }
-  });
-}
 
 async function loadStipends() {
-  try {
-    await loadWorkbook();
-    const rows = sheetToObjects(SHEETS.STIPENDS, 0);
-
-    const monthly = {};
-    let totalUSDYTD = 0;
-
-    rows.forEach((r) => {
-      const date = toDate(r["Date"]);
-      if (!date) return;
-      const monthKey = date.toLocaleString("default", { month: "long", year: "numeric" });
-      monthly[monthKey] = monthly[monthKey] || { usd: 0 };
-      const usd = cleanNumber(r["USD Amount"]);
-      monthly[monthKey].usd += usd;
-      totalUSDYTD += usd;
-    });
-
-    const months = Object.keys(monthly);
-    const totalUSD = months.map((m) => monthly[m].usd);
-
-    const perPersonUSD = 1725;
-    const members = 5;
-    const fixedUSDTotal = perPersonUSD * members;
-    const zecPerPersonUSD = totalUSD.map((total) => (total - fixedUSDTotal) / members);
-
-    document.getElementById("stipendsContent").innerHTML = `
-      <div class="stipends-cards">
-        <div class="stipend-card">
-          <div class="stipend-label">Total Paid YTD</div>
-          <div class="stipend-value">${formatUSD(totalUSDYTD)}</div>
+    try {
+      await loadWorkbook();
+      const rows = sheetToObjects(SHEETS.STIPENDS, 0);
+  
+      const monthly = {};
+      let totalUSDYTD = 0;
+      let totalZECYTD = 0;
+  
+      rows.forEach((r) => {
+        const date = toDate(r["Date"]);
+        if (!date) return;
+  
+        const monthKey = date.toLocaleString("default", {
+          month: "long",
+          year: "numeric"
+        });
+  
+        const usd = cleanNumber(r["USD Amount"]);
+        const zec =
+          cleanNumber(r["ZEC Amount"]) ||
+          cleanNumber(r["ZEC"]) ||
+          0;
+        const zecUsdRate = cleanNumber(r["ZEC/USD"]) || 0;
+  
+        if (!monthly[monthKey]) {
+          monthly[monthKey] = {
+            usd: 0,
+            zec: 0,
+            usdEquivFromZec: 0
+          };
+        }
+  
+        monthly[monthKey].usd += usd;
+        monthly[monthKey].zec += zec;
+        if (zec && zecUsdRate) {
+          monthly[monthKey].usdEquivFromZec += zec * zecUsdRate;
+        }
+  
+        totalUSDYTD += usd;
+        totalZECYTD += zec;
+      });
+  
+      const months = Object.keys(monthly);
+      const usdAllMembers = months.map((m) => monthly[m].usd);
+      const zecAllMembers = months.map((m) => monthly[m].zec);
+      const totalAllMembersUsdEquivalent = months.map(
+        (m) => monthly[m].usd + monthly[m].usdEquivFromZec
+      );
+      const members = 5;
+  
+      document.getElementById("stipendsContent").innerHTML = `
+        <div class="stipends-cards">
+          <div class="stipend-card">
+            <div class="stipend-label">Total Paid YTD (USD cash)</div>
+            <div class="stipend-value">${formatUSD(totalUSDYTD)}</div>
+          </div>
+          <div class="stipend-card">
+            <div class="stipend-label">Total ZEC Paid YTD</div>
+            <div class="stipend-value">${formatZEC(totalZECYTD)}</div>
+          </div>
+          <div class="stipend-card">
+            <div class="stipend-label">Per Member USD Cash YTD</div>
+            <div class="stipend-value">${formatUSD(totalUSDYTD / members)}</div>
+          </div>
         </div>
-        <div class="stipend-card">
-          <div class="stipend-label">Per Member YTD</div>
-          <div class="stipend-value">${formatUSD(totalUSDYTD / members)}</div>
+        <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
+          Committee stipend structure is a mix of USD and ZEC. The chart below shows
+          total amounts per month for all members combined. Values for ZEC are also
+          shown in ZEC units; when available, USD equivalents are computed using the
+          payout ZEC/USD rate.
+        </p>
+        <div class="stipends-chart-wrapper">
+          <div class="stipends-chart-title">Committee Stipends (All Members)</div>
+          <div class="stipends-chart-subtitle">
+            USD cash, ZEC units, and total compensation in USD equivalent
+          </div>
+          <div class="chart-container">
+            <canvas id="stipendsChart"></canvas>
+          </div>
         </div>
-        <div class="stipend-card">
-          <div class="stipend-label">Avg Monthly/Member</div>
-          <div class="stipend-value">${formatUSD((totalUSDYTD / members) / Math.max(1, months.length))}</div>
-        </div>
-      </div>
-      <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
-        ${members} committee members each receive <strong>$${perPersonUSD.toLocaleString()} USD + 10 ZEC</strong> per month.
-      </p>
-      <div class="stipends-chart-wrapper">
-        <div class="stipends-chart-title">Monthly Stipend Breakdown</div>
-        <div class="stipends-chart-subtitle">(USD vs ZEC portion per person)</div>
-        <div class="chart-container">
-          <canvas id="stipendsChart"></canvas>
-        </div>
-      </div>
-    `;
-
-    renderStipendsChart(months, totalUSD, perPersonUSD, zecPerPersonUSD);
-  } catch (error) {
-    console.error(error);
-    document.getElementById("stipendsContent").innerHTML =
-      '<div class="loading-placeholder">Error loading stipends data</div>';
+      `;
+  
+      renderStipendsChart(
+        months,
+        usdAllMembers,
+        zecAllMembers,
+        totalAllMembersUsdEquivalent
+      );
+    } catch (error) {
+      console.error(error);
+      document.getElementById("stipendsContent").innerHTML =
+        '<div class="loading-placeholder">Error loading stipends data</div>';
+    }
   }
-}
+
+function renderStipendsChart(
+    months,
+    usdAllMembers,
+    zecAllMembers,
+    totalAllMembersUsdEquivalent
+  ) {
+    const ctx = document.getElementById("stipendsChart");
+    if (!ctx) return;
+    if (ctx.chart) ctx.chart.destroy();
+  
+    ctx.chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: months,
+        datasets: [
+          {
+            label: "USD paid (all members)",
+            data: usdAllMembers,
+            borderColor: "#4caf50",
+            backgroundColor: "rgba(76, 175, 80, 0.1)",
+            tension: 0.3,
+            fill: true,
+            yAxisID: "yUSD"
+          },
+          {
+            label: "ZEC paid (all members)",
+            data: zecAllMembers,
+            borderColor: "#f3a622",
+            backgroundColor: "rgba(243, 166, 34, 0.1)",
+            tension: 0.3,
+            fill: true,
+            yAxisID: "yZEC"
+          },
+          {
+            label: "Total comp (USD equiv., all members)",
+            data: totalAllMembersUsdEquivalent,
+            borderColor: "#e91e63",
+            backgroundColor: "rgba(233, 30, 99, 0.1)",
+            tension: 0.3,
+            fill: false,
+            yAxisID: "yUSD",
+            borderDash: [5, 4]
+          }
+        ]
+      },
+      options: {
+        ...getChartOptions(),
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: getChartOptions().scales.x,
+          yUSD: {
+            type: "linear",
+            position: "left",
+            title: { display: true, text: "USD" },
+            beginAtZero: true,
+            grid: {
+              color: getComputedStyle(document.documentElement)
+                .getPropertyValue("--grid-color")
+                .trim()
+            },
+            ticks: {
+              color: getComputedStyle(document.documentElement)
+                .getPropertyValue("--text-tertiary")
+                .trim(),
+              callback: (v) => formatUSD(v)
+            }
+          },
+          yZEC: {
+            type: "linear",
+            position: "right",
+            title: { display: true, text: "ZEC" },
+            beginAtZero: true,
+            grid: { drawOnChartArea: false },
+            ticks: {
+              color: getComputedStyle(document.documentElement)
+                .getPropertyValue("--text-tertiary")
+                .trim()
+            }
+          }
+        },
+        plugins: {
+          ...getChartOptions().plugins,
+          tooltip: {
+            mode: "index",
+            intersect: false,
+            callbacks: {
+              label: function (context) {
+                const i = context.dataIndex;
+                const dsLabel = context.dataset.label || "";
+                if (dsLabel.startsWith("USD paid")) {
+                  const usd = usdAllMembers[i] || 0;
+                  return `USD paid: ${formatUSD(usd)}`;
+                }
+                if (dsLabel.startsWith("ZEC paid")) {
+                  const zec = zecAllMembers[i] || 0;
+                  return `ZEC paid: ${formatZEC(zec)}`;
+                }
+                if (dsLabel.startsWith("Total comp")) {
+                  const usd = usdAllMembers[i] || 0;
+                  const zec = zecAllMembers[i] || 0;
+                  const total = totalAllMembersUsdEquivalent[i] || 0;
+                  const zecUsdEquiv = total - usd;
+                  return [
+                    `Total: ${formatUSD(total)}`,
+                    `  - USD cash: ${formatUSD(usd)}`,
+                    `  - ZEC: ${formatUSD(zecUsdEquiv)} (for ${formatZEC(zec)})`
+                  ];
+                }
+                return `${dsLabel}: ${context.formattedValue}`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
 
 /* ===== IC PAYOUTS (AUDIT) ===== */
 function renderAuditPaymentsChart(rows) {
