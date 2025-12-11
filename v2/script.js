@@ -53,6 +53,196 @@ const sortModes = [
   { key: "smallest", icon: "💰", text: "Smallest" }
 ];
 
+function monthDiff(start, end) {
+    // inclusive-ish months between two dates, minimum 1
+    const s = new Date(start.getFullYear(), start.getMonth(), 1);
+    const e = new Date(end.getFullYear(), end.getMonth(), 1);
+    const diff = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
+    return Math.max(diff, 1);
+  }
+  
+  function getCurrentYear() {
+    return new Date().getFullYear();
+  }
+
+  async function computeGrantStats() {
+    await loadWorkbook();
+    const year = getCurrentYear();
+  
+    const grantRows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
+  
+    const getKey = (r) => {
+      const project = (r["Project"] || "").toString().trim();
+      const grantee =
+        (r["Grantee"] ||
+          r["Applicant(s)"] ||
+          r["Applicant"] ||
+          r["Recipient"] ||
+          "").toString().trim();
+      return project && grantee ? `${project}__${grantee}` : "";
+    };
+  
+    const getApprovedDate = (r) =>
+      toDate(
+        r["Date Committee Approved/ Rejected"] ||
+          r["Date Committee Approved/Rejected"] ||
+          r["Approved Date"] ||
+          r["Date"]
+      );
+  
+    const getPaidDate = (r) => toDate(r["Paid Out"]);
+    const getAmountUSD = (r) => cleanNumber(r["Amount (USD)"]);
+    const getZecDisbursed = (r) =>
+      cleanNumber(r["ZEC Disbursed"] || r["ZEC"] || 0);
+  
+    const projectMap = new Map();
+  
+    grantRows.forEach((r) => {
+      const key = getKey(r);
+      if (!key) return;
+      if (!projectMap.has(key)) {
+        projectMap.set(key, {
+          project: (r["Project"] || "").toString().trim(),
+          grantee:
+            (r["Grantee"] ||
+              r["Applicant(s)"] ||
+              r["Applicant"] ||
+              r["Recipient"] ||
+              "").toString().trim(),
+          milestones: [],
+          approvedDates: []
+        });
+      }
+      const rec = projectMap.get(key);
+  
+      const paidDate = getPaidDate(r);
+      const amtUsd = getAmountUSD(r);
+      const zec = getZecDisbursed(r);
+  
+      rec.milestones.push({ paidDate, amtUsd, zec });
+  
+      const d = getApprovedDate(r);
+      if (d) rec.approvedDates.push(d);
+    });
+  
+    const totalProjects = projectMap.size;
+  
+    let totalCompleted = 0;
+    let inProgress = 0;
+    let waiting = 0;
+  
+    let approvedYTD = 0;
+    let completedYTD = 0;
+  
+    let payoutsYTDUSD = 0;
+    let payoutsYTDZEC = 0;
+  
+    let lifetimePayoutUSD = 0;
+    let lifetimeFirstPayout = null;
+    let lifetimeLastPayout = null;
+  
+    projectMap.forEach((rec) => {
+      const hasMilestones = rec.milestones.length > 0;
+      const allPaid =
+        hasMilestones && rec.milestones.every((m) => !!m.paidDate);
+      const anyPaid = rec.milestones.some((m) => !!m.paidDate);
+  
+      if (allPaid) totalCompleted++;
+      else if (anyPaid) inProgress++;
+      else waiting++;
+  
+      const earliestApproved = rec.approvedDates.length
+        ? new Date(Math.min(...rec.approvedDates.map((d) => d.getTime())))
+        : null;
+  
+      let earliestActivity = earliestApproved;
+      if (!earliestActivity) {
+        const paidDates = rec.milestones
+          .map((m) => m.paidDate)
+          .filter(Boolean);
+        if (paidDates.length) {
+          earliestActivity = new Date(
+            Math.min(...paidDates.map((d) => d.getTime()))
+          );
+        }
+      }
+  
+      if (earliestActivity && earliestActivity.getFullYear() === year) {
+        approvedYTD++;
+      }
+  
+      if (allPaid) {
+        const paidDates = rec.milestones
+          .map((m) => m.paidDate)
+          .filter(Boolean);
+        if (paidDates.length) {
+          const lastPaid = new Date(
+            Math.max(...paidDates.map((d) => d.getTime()))
+          );
+          if (lastPaid.getFullYear() === year) {
+            completedYTD++;
+          }
+        }
+      }
+  
+      rec.milestones.forEach((m) => {
+        if (m.paidDate) {
+          lifetimePayoutUSD += m.amtUsd;
+          if (!lifetimeFirstPayout || m.paidDate < lifetimeFirstPayout) {
+            lifetimeFirstPayout = m.paidDate;
+          }
+          if (!lifetimeLastPayout || m.paidDate > lifetimeLastPayout) {
+            lifetimeLastPayout = m.paidDate;
+          }
+          if (m.paidDate.getFullYear() === year) {
+            payoutsYTDUSD += m.amtUsd;
+            payoutsYTDZEC += m.zec;
+          }
+        }
+      });
+    });
+  
+    // Proposals received YTD from ALL_GRANTS
+    const aoaAll = sheetToAoA(SHEETS.ALL_GRANTS);
+    let proposalsReceivedYTD = 0;
+    for (let r = 0; r < aoaAll.length; r++) {
+      const cell = aoaAll[r]?.[0];
+      let d = toDate(cell);
+      if ((!d || isNaN(d)) && typeof cell === "number") {
+        const parsed = XLSX.SSF.parse_date_code(cell);
+        if (parsed) d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+      }
+      if (d && !isNaN(d) && d.getFullYear() === year) {
+        proposalsReceivedYTD++;
+      }
+    }
+  
+    let avgMonthlyPayoutUSD = 0;
+    let monthsSpan = 0;
+    if (lifetimeFirstPayout && lifetimeLastPayout) {
+      monthsSpan = monthDiff(lifetimeFirstPayout, lifetimeLastPayout);
+      avgMonthlyPayoutUSD = lifetimePayoutUSD / monthsSpan;
+    }
+  
+    return {
+      year,
+      totalProjects,
+      totalCompleted,
+      inProgress,
+      waiting,
+      approvedYTD,
+      completedYTD,
+      payoutsYTDUSD,
+      payoutsYTDZEC,
+      proposalsReceivedYTD,
+      lifetimePayoutUSD,
+      lifetimeFirstPayout,
+      lifetimeLastPayout,
+      avgMonthlyPayoutUSD,
+      monthsSpan
+    };
+  }
+
 /* ===== XLSX Source ===== */
 const XLSX_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/pub?output=xlsx";
 
@@ -464,8 +654,7 @@ document.addEventListener("DOMContentLoaded", () => {
   startUpdateTimeFallback();
 });
 
-/* ===== DASHBOARD / OVERVIEW ===== */
-a/* ===== DASHBOARD / OVERVIEW (8-card layout) ===== */
+/* ===== DASHBOARD / OVERVIEW (8-card layout) ===== */
 async function loadOverview() {
     try {
       await loadWorkbook();
@@ -752,6 +941,183 @@ async function loadOverview() {
     }
   }
 
+  async function computeGrantStats() {
+  await loadWorkbook();
+  const year = getCurrentYear();
+
+  const grantRows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
+
+  const getKey = (r) => {
+    const project = (r["Project"] || "").toString().trim();
+    const grantee =
+      (r["Grantee"] ||
+        r["Applicant(s)"] ||
+        r["Applicant"] ||
+        r["Recipient"] ||
+        "").toString().trim();
+    return project && grantee ? `${project}__${grantee}` : "";
+  };
+
+  const getApprovedDate = (r) =>
+    toDate(
+      r["Date Committee Approved/ Rejected"] ||
+        r["Date Committee Approved/Rejected"] ||
+        r["Approved Date"] ||
+        r["Date"]
+    );
+
+  const getPaidDate = (r) => toDate(r["Paid Out"]);
+  const getAmountUSD = (r) => cleanNumber(r["Amount (USD)"]);
+  const getZecDisbursed = (r) =>
+    cleanNumber(r["ZEC Disbursed"] || r["ZEC"] || 0);
+
+  const projectMap = new Map();
+
+  grantRows.forEach((r) => {
+    const key = getKey(r);
+    if (!key) return;
+    if (!projectMap.has(key)) {
+      projectMap.set(key, {
+        project: (r["Project"] || "").toString().trim(),
+        grantee:
+          (r["Grantee"] ||
+            r["Applicant(s)"] ||
+            r["Applicant"] ||
+            r["Recipient"] ||
+            "").toString().trim(),
+        milestones: [],
+        approvedDates: []
+      });
+    }
+    const rec = projectMap.get(key);
+
+    const paidDate = getPaidDate(r);
+    const amtUsd = getAmountUSD(r);
+    const zec = getZecDisbursed(r);
+
+    rec.milestones.push({ paidDate, amtUsd, zec });
+
+    const d = getApprovedDate(r);
+    if (d) rec.approvedDates.push(d);
+  });
+
+  const totalProjects = projectMap.size;
+
+  let totalCompleted = 0;
+  let inProgress = 0;
+  let waiting = 0;
+
+  let approvedYTD = 0;
+  let completedYTD = 0;
+
+  let payoutsYTDUSD = 0;
+  let payoutsYTDZEC = 0;
+
+  let lifetimePayoutUSD = 0;
+  let lifetimeFirstPayout = null;
+  let lifetimeLastPayout = null;
+
+  projectMap.forEach((rec) => {
+    const hasMilestones = rec.milestones.length > 0;
+    const allPaid =
+      hasMilestones && rec.milestones.every((m) => !!m.paidDate);
+    const anyPaid = rec.milestones.some((m) => !!m.paidDate);
+
+    if (allPaid) totalCompleted++;
+    else if (anyPaid) inProgress++;
+    else waiting++;
+
+    const earliestApproved = rec.approvedDates.length
+      ? new Date(Math.min(...rec.approvedDates.map((d) => d.getTime())))
+      : null;
+
+    let earliestActivity = earliestApproved;
+    if (!earliestActivity) {
+      const paidDates = rec.milestones
+        .map((m) => m.paidDate)
+        .filter(Boolean);
+      if (paidDates.length) {
+        earliestActivity = new Date(
+          Math.min(...paidDates.map((d) => d.getTime()))
+        );
+      }
+    }
+
+    if (earliestActivity && earliestActivity.getFullYear() === year) {
+      approvedYTD++;
+    }
+
+    if (allPaid) {
+      const paidDates = rec.milestones
+        .map((m) => m.paidDate)
+        .filter(Boolean);
+      if (paidDates.length) {
+        const lastPaid = new Date(
+          Math.max(...paidDates.map((d) => d.getTime()))
+        );
+        if (lastPaid.getFullYear() === year) {
+          completedYTD++;
+        }
+      }
+    }
+
+    rec.milestones.forEach((m) => {
+      if (m.paidDate) {
+        lifetimePayoutUSD += m.amtUsd;
+        if (!lifetimeFirstPayout || m.paidDate < lifetimeFirstPayout) {
+          lifetimeFirstPayout = m.paidDate;
+        }
+        if (!lifetimeLastPayout || m.paidDate > lifetimeLastPayout) {
+          lifetimeLastPayout = m.paidDate;
+        }
+        if (m.paidDate.getFullYear() === year) {
+          payoutsYTDUSD += m.amtUsd;
+          payoutsYTDZEC += m.zec;
+        }
+      }
+    });
+  });
+
+  // Proposals received YTD from ALL_GRANTS
+  const aoaAll = sheetToAoA(SHEETS.ALL_GRANTS);
+  let proposalsReceivedYTD = 0;
+  for (let r = 0; r < aoaAll.length; r++) {
+    const cell = aoaAll[r]?.[0];
+    let d = toDate(cell);
+    if ((!d || isNaN(d)) && typeof cell === "number") {
+      const parsed = XLSX.SSF.parse_date_code(cell);
+      if (parsed) d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    }
+    if (d && !isNaN(d) && d.getFullYear() === year) {
+      proposalsReceivedYTD++;
+    }
+  }
+
+  let avgMonthlyPayoutUSD = 0;
+  let monthsSpan = 0;
+  if (lifetimeFirstPayout && lifetimeLastPayout) {
+    monthsSpan = monthDiff(lifetimeFirstPayout, lifetimeLastPayout);
+    avgMonthlyPayoutUSD = lifetimePayoutUSD / monthsSpan;
+  }
+
+  return {
+    year,
+    totalProjects,
+    totalCompleted,
+    inProgress,
+    waiting,
+    approvedYTD,
+    completedYTD,
+    payoutsYTDUSD,
+    payoutsYTDZEC,
+    proposalsReceivedYTD,
+    lifetimePayoutUSD,
+    lifetimeFirstPayout,
+    lifetimeLastPayout,
+    avgMonthlyPayoutUSD,
+    monthsSpan
+  };
+}
 /* ===== Activity Metrics ===== */
 async function loadActivityMetrics() {
   try {
