@@ -713,13 +713,22 @@ async function loadOverview() {
     // Grants stats
     const grantStats = await computeGrantStats();
 
-    // Dev fund inflow approximation
-    const valZecAccruedYTDFromSheet = getValue("ZEC accrued YTD");
-    let zecAccruedYTD = cleanNumber(valZecAccruedYTDFromSheet);
+// Dev fund inflow approximation
+const DAILY_ZEC_ACCRUAL = 144; // Current daily ZEC accrual rate
 
-    const monthsElapsedThisYear = new Date().getMonth() + 1;
-    const avgMonthlyInflowZEC =
-      monthsElapsedThisYear > 0 ? zecAccruedYTD / monthsElapsedThisYear : 0;
+const valZecAccruedYTDFromSheet = getValue("ZEC accrued YTD");
+let zecAccruedYTD = cleanNumber(valZecAccruedYTDFromSheet);
+
+// If no YTD value from sheet, calculate based on daily accrual rate
+if (!zecAccruedYTD || zecAccruedYTD === 0) {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const daysElapsedYTD = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24)) + 1;
+  zecAccruedYTD = daysElapsedYTD * DAILY_ZEC_ACCRUAL;
+}
+
+const monthsElapsedThisYear = new Date().getMonth() + 1;
+const avgMonthlyInflowZEC = DAILY_ZEC_ACCRUAL * 30.44; // Average days per month
 
     // Coverage
     const hedgedCoverageRatio =
