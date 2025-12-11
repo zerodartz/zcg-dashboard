@@ -465,107 +465,292 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ===== DASHBOARD / OVERVIEW ===== */
+a/* ===== DASHBOARD / OVERVIEW (8-card layout) ===== */
 async function loadOverview() {
-  try {
-    await loadWorkbook();
-    const rows = sheetToAoA(SHEETS.DASHBOARD_ZCG);
-
-    const norm = (s) =>
-      (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
-    const getValue = (label) => {
-      const r = rows.find((row) => norm(row[0]).includes(norm(label)));
-      return r ? r[1] : "N/A";
-    };
-
-    // Block time
-    const blockTimeUTC = getValue("Block time (UTC)");
-    if (blockTimeUTC && blockTimeUTC !== "N/A") {
-      clearTimeout(updateTimeTimeout);
-      const dt = toDate(blockTimeUTC) || new Date(blockTimeUTC + " UTC");
-      if (dt) {
-        lastUpdateTime = dt;
-        updateLastUpdateTime();
+    try {
+      await loadWorkbook();
+      const rows = sheetToAoA(SHEETS.DASHBOARD_ZCG);
+  
+      const norm = (s) =>
+        (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
+  
+      const getValue = (label) => {
+        const r = rows.find((row) => norm(row[0]).includes(norm(label)));
+        return r ? r[1] : null;
+      };
+  
+      // Block time / last update
+      const blockTimeUTC = getValue("Block time (UTC)");
+      if (blockTimeUTC) {
+        clearTimeout(updateTimeTimeout);
+        const dt = toDate(blockTimeUTC) || new Date(blockTimeUTC + " UTC");
+        if (dt) {
+          lastUpdateTime = dt;
+          updateLastUpdateTime();
+        }
       }
-    }
-
-    // Extract values
-    const valApproved = getValue("Total USD value of grants approved");
-    const valPaidOut = getValue("USD value of grant milestones paid out so far");
-    const valZecBal = getValue("Current ZEC balance");
-    const valZecBalUsd = getValue("USD value of Current ZEC balance");
-    const valUsdBal = getValue("Current USD balance");
-    const valFuture = getValue("Future grant liabilities");
-    const valUnhedged = getValue("Unhedged grant liabilities (USD)");
-    const valZecPrice = getValue("ZECUSD price");
-    const valTotalZecAccrued = getValue("Total ZEC accrued to date");
-    const valUsdReserves = getValue("USD reserves");
-    const valDev1 = getValue("ZEC accrued from 1st Dev Fund");
-    const valDev2 = getValue("ZEC accrued from 2nd Dev Fund");
-
-    const usdCards = [
-      { label: "Approved Grants", value: formatUSDInt(valApproved) },
-      { label: "Paid Out in USD", value: formatUSDInt(valPaidOut) },
-      { label: "USD Balance", value: formatUSDInt(valUsdBal) },
-      { label: "Future Liabilities", value: formatUSDInt(valFuture) },
-      { label: "Extra Hedged USD", value: formatUSDInt(valUsdReserves) },
-      { label: "Unhedged USD", value: formatUSDInt(valUnhedged) },
-      { label: "Value of ZEC Balance", value: formatUSDInt(valZecBalUsd) }
-    ];
-
-    const zecCards = [
-      {
-        label: "Current ZEC Balance",
-        value: (Number(cleanNumber(valZecBal)) || 0).toLocaleString()
-      },
-      {
-        label: "Total ZEC Accrued",
-        value: (Number(cleanNumber(valTotalZecAccrued)) || 0).toLocaleString()
-      },
-      {
-        label: "ZEC from 1st Dev Fund",
-        value: (Number(cleanNumber(valDev1)) || 0).toLocaleString()
-      },
-      {
-        label: "ZEC from 2nd Dev Fund",
-        value: (Number(cleanNumber(valDev2)) || 0).toLocaleString()
-      },
-      { label: "ZEC Price USD", value: formatZecPrice(valZecPrice) }
-    ];
-
-    const usdEl = document.getElementById("usdMetrics");
-    const zecEl = document.getElementById("zecMetrics");
-
-    if (usdEl) {
-      usdEl.innerHTML = usdCards
-        .map(
-          (card) => `
+  
+      // Core treasury data
+      const valZecBal       = getValue("Current ZEC balance");
+      const valZecBalUsd    = getValue("USD value of Current ZEC balance");
+      const valUsdBal       = getValue("Current USD balance");
+      const valUsdReserves  = getValue("USD reserves");
+      const valFuture       = getValue("Future grant liabilities");
+      const valUnhedged     = getValue("Unhedged grant liabilities (USD)");
+      const valZecPrice     = getValue("ZECUSD price");
+      const valTotalZecAccr = getValue("Total ZEC accrued to date");
+      const valDev1         = getValue("ZEC accrued from 1st Dev Fund");
+      const valDev2         = getValue("ZEC accrued from 2nd Dev Fund");
+      const valDev3         = getValue("ZEC accrued from 3rd Dev Fund"); // may be null
+  
+      const zecPrice  = cleanNumber(valZecPrice);
+      const zecBal    = cleanNumber(valZecBal);
+      const zecBalUsdNum = cleanNumber(valZecBalUsd);
+      const usdBal    = cleanNumber(valUsdBal);
+      const usdRes    = cleanNumber(valUsdReserves);
+      const futureLiab = cleanNumber(valFuture);
+      const unhedged   = cleanNumber(valUnhedged);
+      const hedgedUSD  = usdRes; // treated as extra hedged USD pool
+  
+      const totalTreasuryUSD =
+        (zecBalUsdNum || zecBal * zecPrice) + usdBal + usdRes;
+  
+      // ZEC accrued pieces
+      const zecAccTotal = cleanNumber(valTotalZecAccr);
+      const zecDev1     = cleanNumber(valDev1);
+      const zecDev2     = cleanNumber(valDev2);
+      const zecDev3     = cleanNumber(valDev3);
+  
+      // Grants stats (lifetime + YTD + average payout)
+      const grantStats = await computeGrantStats();
+  
+      // --- Dev fund inflow approximation ---
+      // Very simple heuristic: use YTD ZEC accrued if you have it in the sheet,
+      // otherwise approximate from ZCG Funds / accrual rows.
+      // If you add a row like "ZEC accrued YTD" we can read it directly:
+      const valZecAccruedYTDFromSheet = getValue("ZEC accrued YTD");
+      let zecAccruedYTD = cleanNumber(valZecAccruedYTDFromSheet);
+  
+      // Fallback: derive YTD ZEC inflow from some accrual sheet if needed.
+      // For now, if sheet doesn’t provide it we leave as 0.
+      const monthsElapsedThisYear = new Date().getMonth() + 1;
+      const avgMonthlyInflowZEC =
+        monthsElapsedThisYear > 0 ? zecAccruedYTD / monthsElapsedThisYear : 0;
+  
+      // Coverage
+      const hedgedCoverageRatio =
+        futureLiab > 0 ? hedgedUSD / futureLiab : null;
+  
+      const usdMetricsEl  = document.getElementById("usdMetrics");
+      const activityEl    = document.getElementById("activityMetrics");
+  
+      if (!usdMetricsEl || !activityEl) return;
+  
+      /* ===== Treasury (5 cards) ===== */
+  
+      // 1. Total Treasury Value
+      const cardTotalTreasury = `
         <div class="metric-card">
-          <div class="metric-label">${card.label}</div>
-          <div class="metric-number">${card.value}</div>
-        </div>`
-        )
-        .join("");
-    }
-
-    if (zecEl) {
-      zecEl.innerHTML = zecCards
-        .map(
-          (card) => `
+          <div class="metric-label">Total Treasury Value</div>
+          <div class="metric-number">${formatUSD(totalTreasuryUSD)}</div>
+          <div style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;">
+            ZEC + USD at current market price
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-tertiary);margin-top:0.25rem;">
+            Price: $${formatZecPrice(zecPrice)}
+          </div>
+        </div>
+      `;
+  
+      // 2. Asset Mix
+      const cardAssetMix = `
         <div class="metric-card">
-          <div class="metric-label">${card.label}</div>
-          <div class="metric-number">${card.value}</div>
-        </div>`
-        )
-        .join("");
+          <div class="metric-label">Asset Mix</div>
+          <div style="font-size:0.9rem;color:var(--text-secondary);display:flex;flex-direction:column;gap:0.25rem;">
+            <div><strong>ZEC Holdings:</strong> ${zecBal.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            })} ZEC (≈${formatUSD(zecBalUsdNum || zecBal * zecPrice)})</div>
+            <div><strong>USD Reserves:</strong> ${formatUSD(usdBal + usdRes)}</div>
+          </div>
+          ${
+            (hedgedUSD || unhedged)
+              ? `
+          <div style="margin-top:0.75rem;">
+            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-bottom:0.25rem;">
+              Hedged vs Unhedged (USD)
+            </div>
+            <div style="width:100%;height:6px;background:var(--bg-secondary);border-radius:999px;overflow:hidden;">
+              <div style="height:100%;width:${
+                futureLiab > 0
+                  ? Math.min(100, (hedgedUSD / Math.max(futureLiab, hedgedUSD)) * 100)
+                  : 100
+              }%;background:linear-gradient(90deg,#4caf50,#8bc34a);"></div>
+            </div>
+            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:0.25rem;">
+              Hedged: ${formatUSD(hedgedUSD)} • Unhedged: ${formatUSD(unhedged)}
+            </div>
+          </div>
+          `
+              : ""
+          }
+        </div>
+      `;
+  
+      // 3. ZEC Accrued (Lifetime + YTD + Dev Funds)
+      const cardZecAccrued = `
+        <div class="metric-card">
+          <div class="metric-label">ZEC Accrued</div>
+          <div class="metric-number">
+            ${zecAccTotal.toLocaleString(undefined, {
+              minimumFractionDigits: 3,
+              maximumFractionDigits: 3
+            })} ZEC
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-tertiary);margin-top:0.25rem;">
+            ≈${formatUSD(zecAccTotal * zecPrice)} @ $${formatZecPrice(zecPrice)}/ZEC
+          </div>
+          <div style="display:flex;gap:1.5rem;margin-top:0.75rem;font-size:0.85rem;color:var(--text-secondary);flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:600;margin-bottom:0.25rem;">By Dev Fund (lifetime)</div>
+              <div>1st Dev Fund: ${zecDev1.toLocaleString(undefined,{maximumFractionDigits:3})} ZEC</div>
+              <div>2nd Dev Fund: ${zecDev2.toLocaleString(undefined,{maximumFractionDigits:3})} ZEC</div>
+              ${
+                zecDev3
+                  ? `<div>3rd Dev Fund: ${zecDev3.toLocaleString(undefined,{maximumFractionDigits:3})} ZEC</div>`
+                  : ""
+              }
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:0.25rem;">YTD Accrual</div>
+              <div>${zecAccruedYTD.toLocaleString(undefined,{
+                maximumFractionDigits:3
+              })} ZEC</div>
+              <div style="font-size:0.8rem;color:var(--text-tertiary);">
+                ≈${formatUSD(zecAccruedYTD * zecPrice)}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+  
+      // 4. Dev Fund Inflow (Monthly)
+      const cardDevInflow = `
+        <div class="metric-card">
+          <div class="metric-label">Dev Fund Inflow</div>
+          <div class="metric-number">
+            Avg Monthly Inflow: ${avgMonthlyInflowZEC.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            })} ZEC
+          </div>
+          <div style="font-size:0.85rem;color:var(--text-tertiary);margin-top:0.25rem;">
+            ≈${formatUSD(avgMonthlyInflowZEC * zecPrice)} at current price
+          </div>
+          <!-- optional mini sparkline could go here later -->
+        </div>
+      `;
+  
+      // 5. Treasury Commitments & Coverage
+      const coverageText =
+        hedgedCoverageRatio === null
+          ? ""
+          : hedgedCoverageRatio >= 1
+          ? `Hedged: ${(hedgedCoverageRatio * 100).toFixed(0)}% of liabilities`
+          : `Hedged: ${(hedgedCoverageRatio * 100).toFixed(0)}% of liabilities`;
+  
+      const cardCommitments = `
+        <div class="metric-card">
+          <div class="metric-label">Commitments & Coverage</div>
+          <div class="metric-number">
+            Future Liabilities: ${formatUSD(futureLiab)}
+          </div>
+          <div style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;">
+            Hedged Coverage: ${formatUSD(hedgedUSD)}${coverageText ? " • " + coverageText : ""}
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-tertiary);margin-top:0.25rem;">
+            Unhedged: ${formatUSD(unhedged)}
+          </div>
+        </div>
+      `;
+  
+      usdMetricsEl.innerHTML =
+        cardTotalTreasury +
+        cardAssetMix +
+        cardZecAccrued +
+        cardDevInflow +
+        cardCommitments;
+  
+      /* ===== Grants (3 cards) ===== */
+  
+      // 6. Grants Overview (lifetime)
+      const cardGrantsOverview = `
+        <div class="metric-card">
+          <div class="metric-label">Grants Overview</div>
+          <div style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin-bottom:0.25rem;">
+            ${grantStats.totalProjects.toLocaleString()} Total Grants
+          </div>
+          <div style="font-size:0.9rem;color:var(--text-secondary);display:flex;gap:1.5rem;flex-wrap:wrap;">
+            <div>Completed: ${grantStats.totalCompleted.toLocaleString()}</div>
+            <div>In Progress: ${grantStats.inProgress.toLocaleString()}</div>
+            <div>Pending: ${grantStats.waiting.toLocaleString()}</div>
+          </div>
+        </div>
+      `;
+  
+      // 7. YTD Grant Activity
+      const cardYTDActivity = `
+        <div class="metric-card">
+          <div class="metric-label">${grantStats.year} Grant Activity</div>
+          <div style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin-bottom:0.25rem;">
+            ${grantStats.approvedYTD.toLocaleString()} Approved • ${grantStats.completedYTD.toLocaleString()} Completed
+          </div>
+          <div style="font-size:0.9rem;color:var(--text-secondary);">
+            Payouts YTD: ${formatUSD(grantStats.payoutsYTDUSD)}
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-tertiary);margin-top:0.25rem;">
+            = ${grantStats.payoutsYTDZEC.toLocaleString(undefined,{
+              minimumFractionDigits:2,
+              maximumFractionDigits:2
+            })} ZEC (≈${formatUSD(grantStats.payoutsYTDZEC * zecPrice)})
+          </div>
+        </div>
+      `;
+  
+      // 8. Historical Payout Velocity
+      const cardPayoutVelocity = `
+        <div class="metric-card">
+          <div class="metric-label">Average Monthly Payout (All-Time)</div>
+          <div class="metric-number">
+            ${formatUSD(grantStats.avgMonthlyPayoutUSD)}
+          </div>
+          <div style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.25rem;">
+            Based on ${formatUSD(grantStats.lifetimePayoutUSD)} paid over ${grantStats.monthsSpan} months
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-tertiary);margin-top:0.25rem;">
+            ≈${(grantStats.avgMonthlyPayoutUSD / zecPrice || 0).toLocaleString(undefined,{
+              minimumFractionDigits:2,
+              maximumFractionDigits:2
+            })} ZEC / month @ $${formatZecPrice(zecPrice)}
+          </div>
+          <!-- optional tiny line chart of payouts/month can be added here later -->
+        </div>
+      `;
+  
+      activityEl.innerHTML =
+        cardGrantsOverview + cardYTDActivity + cardPayoutVelocity;
+    } catch (error) {
+      console.error("Error in loadOverview (8-card layout):", error);
+      const usdEl = document.getElementById("usdMetrics");
+      const actEl = document.getElementById("activityMetrics");
+      if (usdEl)
+        usdEl.innerHTML =
+          '<div class="loading">Error loading treasury metrics</div>';
+      if (actEl)
+        actEl.innerHTML =
+          '<div class="loading">Error loading grants metrics</div>';
     }
-  } catch (error) {
-    console.error("Error in loadOverview:", error);
-    const usdEl = document.getElementById("usdMetrics");
-    const zecEl = document.getElementById("zecMetrics");
-    if (usdEl) usdEl.innerHTML = '<div class="loading">Error loading USD metrics</div>';
-    if (zecEl) zecEl.innerHTML = '<div class="loading">Error loading ZEC metrics</div>';
   }
-}
 
 /* ===== Activity Metrics ===== */
 async function loadActivityMetrics() {
