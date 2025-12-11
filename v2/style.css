@@ -581,8 +581,18 @@
   }
   
   .grant-status.waiting {
-    background: rgba(107, 114, 128, 0.12);
+    background: rgba(144, 147, 152, 0.12);
     color: var(--text-secondary);
+  }
+
+  .grant-status.discussion {
+    background: rgba(236, 115, 9, 0.12);
+    color: var(--warning);
+  }
+  
+  .grant-status.declined {
+    background: rgba(216, 62, 62, 0.12);
+    color: var(--danger);
   }
   
   .grant-plus-btn {
@@ -1044,6 +1054,44 @@
   
     .main-content {
       padding: 0;
+    }
+  }
+  
+  .site-footer {
+    border-top: 1px solid var(--border);
+    background: var(--card-bg);
+    padding: 0.75rem 2rem;
+    position: relative;
+    z-index: 50;
+  }
+  
+  .site-footer-inner {
+    max-width: 1600px;
+    margin: 0 auto;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  
+  .site-footer a {
+    color: var(--zcash-yellow);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  
+  .site-footer a:hover {
+    text-decoration: underline;
+  }
+  
+  @media (max-width: 768px) {
+    .site-footer {
+      padding: 0.75rem 1rem;
+      /* ensure it doesn't hide behind bottom nav */
+      margin-bottom: 3rem;
     }
   }
   
