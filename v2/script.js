@@ -33,18 +33,6 @@ let currentApprovedTimeFilter = "ytd";
 // GitHub cache
 const githubIssueCache = {};
 
-/* ===== Mobile Header Scroll Behavior ===== */
-window.addEventListener("scroll", function () {
-  const header = document.querySelector(".mobile-header");
-  let st = window.pageYOffset || document.documentElement.scrollTop;
-  if (st > lastScrollTop && st > 50) {
-    header.style.transform = "translateY(-100%)";
-  } else {
-    header.style.transform = "translateY(0)";
-  }
-  lastScrollTop = st <= 0 ? 0 : st;
-}, false);
-
 /* ===== Sort Modes ===== */
 const sortModes = [
   { key: "newest", icon: "📅", text: "Newest" },
@@ -70,6 +58,104 @@ const SHEETS = {
   BUDGET_2025: "ZCG 2025 Disc. Budget",
   ALL_GRANTS: "ZCG All Grants Tracking"
 };
+
+/* ===== Navigation ===== */
+function showPage(pageName) {
+    // Hide all pages
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    
+    // Show selected page
+    const targetPage = document.getElementById(pageName);
+    if (targetPage) targetPage.classList.add('active');
+    
+    // Update nav links
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.bottom-nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll(`[data-page="${pageName}"]`).forEach(l => l.classList.add('active'));
+    
+    // Load tab data if not loaded
+    if (!loadedTabs.has(pageName)) {
+      const tabInfo = tabRoutes[pageName];
+      if (tabInfo) {
+        tabInfo.load();
+        loadedTabs.add(pageName);
+      }
+    }
+    
+    // Refresh charts on dashboard
+    if (pageName === "dashboard" && loadedTabs.has("dashboard")) {
+      loadPayoutsChart();
+      loadCategoryChart();
+      loadZecPriceTrend();
+      loadApprovedChart();
+    }
+    
+    // Update URL hash
+    history.pushState({ page: pageName }, "", `#${pageName}`);
+    
+    // Update page title
+    const titles = {
+      dashboard: "Dashboard",
+      grants: "Grants",
+      payments: "Payments",
+      auditpayments: "Audit Payments",
+      liquidity: "Maya Liquidity",
+      stipends: "Stipends",
+      notetaker: "Notetaker Payments"
+    };
+    document.title = `${titles[pageName] || "Dashboard"} - Zcash Community Grants`;
+  }
+  
+  function initNavigation() {
+    // Desktop nav clicks
+    document.querySelectorAll('.nav-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        showPage(link.dataset.page);
+      });
+    });
+    
+    // Bottom nav clicks (mobile)
+    document.querySelectorAll('.bottom-nav-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        showPage(link.dataset.page);
+      });
+    });
+    
+    // Handle browser back/forward
+    window.addEventListener('popstate', (e) => {
+      const page = e.state?.page || getPageFromHash();
+      showPage(page);
+    });
+    
+    // Load initial page from hash
+    const initialPage = getPageFromHash();
+    showPage(initialPage);
+  }
+  
+  function getPageFromHash() {
+    const hash = window.location.hash.substring(1);
+    return tabRoutes[hash] ? hash : "dashboard";
+  }
+  
+  /* ===== Theme Toggle ===== */
+  function initThemeToggle() {
+    const themeToggle = document.getElementById('themeToggle');
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    themeToggle.textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+    
+    themeToggle.addEventListener('click', () => {
+      const currentTheme = document.documentElement.getAttribute('data-theme');
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      themeToggle.textContent = newTheme === 'dark' ? '☀️' : '🌙';
+    });
+  }
 
 /* ===== Workbook Loader ===== */
 async function loadWorkbook() {
@@ -200,145 +286,9 @@ const tabRoutes = {
   notetaker: { id: "notetaker", load: loadNotetaker }
 };
 
-/* ===== Router Functions ===== */
-function initRouter() {
-  const initialTab = getTabFromHash();
-  navigateToTab(initialTab, false);
-
-  window.addEventListener("popstate", (e) => {
-    const tab = e.state?.tab || getTabFromHash();
-    navigateToTab(tab, false);
-  });
-
-  document.querySelectorAll(".nav-link").forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      const tab = link.getAttribute("href").substring(1);
-      navigateToTab(tab, true);
-    });
-  });
-}
-
-function getTabFromHash() {
-  const hash = window.location.hash.substring(1);
-  return tabRoutes[hash] ? hash : "dashboard";
-}
-
-function navigateToTab(tabName, pushState = true) {
-  closeMobileMenu();
-
-  if (pushState) {
-    const newUrl = `${window.location.pathname}#${tabName}`;
-    history.pushState({ tab: tabName }, "", newUrl);
-  }
-
-  document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-  document.querySelectorAll(".nav-link").forEach((l) => l.classList.remove("active"));
-
-  const tabElement = document.getElementById(tabName);
-  const navElement = document.querySelector(`[href="#${tabName}"]`);
-
-  if (tabElement) tabElement.classList.add("active");
-  if (navElement) navElement.classList.add("active");
-
-  const mobileSearchBar = document.querySelector(".mobile-search-bar");
-  if (window.innerWidth <= 768 && tabName === "grants") {
-    mobileSearchBar.style.display = "block";
-  } else {
-    mobileSearchBar.style.display = "none";
-  }
-
-  const tabInfo = tabRoutes[tabName];
-  if (tabInfo && !loadedTabs.has(tabName)) {
-    tabInfo.load();
-    loadedTabs.add(tabName);
-  }
-
-  if (tabName === "dashboard" && loadedTabs.has("dashboard")) {
-    loadPayoutsChart();
-    loadCategoryChart();
-    loadZecPriceTrend();
-    loadApprovedChart();
-  }
-
-  const tabTitles = {
-    dashboard: "Dashboard",
-    grants: "Grants",
-    payments: "Payments",
-    auditpayments: "Audit Payments",
-    liquidity: "Maya Liquidity",
-    stipends: "Stipends",
-    notetaker: "Notetaker Payments"
-  };
-  if (tabTitles[tabName]) {
-    document.title = `${tabTitles[tabName]} - Zcash Community Grants Dashboard`;
-  }
-}
-
-function jumpToGrantsTab() {
-  if (location.hash !== "#grants") {
-    navigateToTab("grants", true);
-  }
-}
-
-/* ===== Mobile Menu ===== */
-function toggleMobileMenu() {
-  const sidebar = document.getElementById("sidebar");
-  const overlay = document.querySelector(".sidebar-overlay");
-  const hamburger = document.querySelector(".hamburger");
-
-  sidebar.classList.toggle("active");
-  overlay.classList.toggle("active");
-  hamburger.classList.toggle("active");
-}
-
-function closeMobileMenu() {
-  const sidebar = document.getElementById("sidebar");
-  const overlay = document.querySelector(".sidebar-overlay");
-  const hamburger = document.querySelector(".hamburger");
-
-  sidebar.classList.remove("active");
-  overlay.classList.remove("active");
-  hamburger.classList.remove("active");
-}
-
-/* ===== Dark Mode ===== */
-function toggleDarkMode() {
-  const currentTheme = document.documentElement.getAttribute("data-theme");
-  const newTheme = currentTheme === "dark" ? "light" : "dark";
-
-  document.documentElement.setAttribute("data-theme", newTheme);
-  localStorage.setItem("theme", newTheme);
-
-  const icon = document.getElementById("darkModeIcon");
-  const text = document.getElementById("darkModeText");
-
-  if (newTheme === "dark") {
-    icon.textContent = "☀️";
-    text.textContent = "Light Mode";
-  } else {
-    icon.textContent = "🌙";
-    text.textContent = "Dark Mode";
-  }
-}
-
-function initTheme() {
-  const savedTheme = localStorage.getItem("theme") || "light";
-  document.documentElement.setAttribute("data-theme", savedTheme);
-
-  const icon = document.getElementById("darkModeIcon");
-  const text = document.getElementById("darkModeText");
-
-  if (savedTheme === "dark") {
-    icon.textContent = "☀️";
-    text.textContent = "Light Mode";
-  }
-}
-
 /* ===== Update Time ===== */
 function updateLastUpdateTime() {
   const desktopEl = document.getElementById("desktopUpdateTime");
-  const mobileEl = document.getElementById("mobileUpdateTime");
 
   if (lastUpdateTime) {
     const timeString = lastUpdateTime.toLocaleString();
@@ -360,36 +310,20 @@ function startUpdateTimeFallback() {
 
 /* ===== Search & Filters ===== */
 function setupSearch() {
-  const desktopSearch = document.getElementById("desktopSearch");
-  const mobileSearch = document.getElementById("mobileSearch");
-
-  [desktopSearch, mobileSearch].forEach((input) => {
-    input.addEventListener("focus", () => {
-      jumpToGrantsTab();
+    const searchInput = document.getElementById("desktopSearch");
+    if (!searchInput) return;
+    
+    searchInput.addEventListener("focus", () => {
+      if (window.location.hash !== "#grants") {
+        showPage("grants");
+      }
     });
-    input.addEventListener("input", (e) => {
+    
+    searchInput.addEventListener("input", (e) => {
       const query = (e.target.value || "").toLowerCase();
-      if (input === desktopSearch) mobileSearch.value = query;
-      if (input === mobileSearch) desktopSearch.value = query;
       filterGrantsBySearch(query);
     });
-  });
-}
-
-function setupMobileFilters() {
-  const mobileFilters = document.getElementById("mobileFilters");
-  mobileFilters.innerHTML = `
-    <div class="pill active" onclick="filterGrants('all')">All</div>
-    <div class="pill" onclick="filterGrants('completed')">✓</div>
-    <div class="pill" onclick="filterGrants('in-progress')">⏳</div>
-    <div class="pill" onclick="filterGrants('waiting')">⏸</div>
-    <div class="pill active" onclick="filterGrantsByBudget('all')">💰</div>
-    <div class="pill" onclick="filterGrantsByBudget('small')">&lt;50k</div>
-    <div class="pill" onclick="filterGrantsByBudget('medium')">50-200k</div>
-    <div class="pill" onclick="filterGrantsByBudget('large')">200k+</div>
-    <button class="sort-btn" onclick="cycleSortMode()">📅 Newest</button>
-  `;
-}
+  }
 
 /* ===== Chart Options ===== */
 const getChartOptions = () => ({
@@ -441,38 +375,42 @@ document.addEventListener("keydown", (e) => {
     if (document.getElementById("modalOverlay").classList.contains("active")) {
       closeModal();
     }
-    if (document.getElementById("sidebar").classList.contains("active")) {
-      closeMobileMenu();
-    }
   }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
-  const overlay = document.querySelector(".sidebar-overlay");
-  if (overlay) {
-    overlay.addEventListener("click", () => {
-      closeMobileMenu();
-    });
-  }
+    /* ===== Sidebar overlay ===== */
+    const overlay = document.querySelector(".sidebar-overlay");
+    if (overlay) {
+      overlay.addEventListener("click", () => {
+        closeMobileMenu();
+      });
+    }
   
-  const modalOverlay = document.getElementById("modalOverlay");
-  if (modalOverlay) {
-    modalOverlay.addEventListener("click", (e) => {
-      if (!e.target.closest(".modal-content")) {
-        closeModal();
-      }
-    });
-  }
-});
+    /* ===== Initialize ===== */
+    initThemeToggle();
+    initNavigation();
+    setupSearch();
+    startUpdateTimeFallback();
+  
+    /* ===== Modal overlay ===== */
+    const modalOverlay = document.getElementById("modalOverlay");
+    if (modalOverlay) {
+      modalOverlay.addEventListener("click", (e) => {
+        if (!e.target.closest(".modal-content")) {
+          closeModal();
+        }
+      });
+    }
+  });
 
 /* ===== Initialize ===== */
 document.addEventListener("DOMContentLoaded", () => {
-  initTheme();
-  initRouter();
-  setupSearch();
-  setupMobileFilters();
-  startUpdateTimeFallback();
-});
+    initThemeToggle();
+    initNavigation();
+    setupSearch();
+    startUpdateTimeFallback();
+  });
 
 /* ===== Compute Grant Stats ===== */
 async function computeGrantStats() {
@@ -2773,7 +2711,6 @@ async function loadGrants() {
   }
   
   /* ===== Expose Functions to Window ===== */
-  window.toggleMobileMenu = toggleMobileMenu;
   window.filterPayoutsByTime = filterPayoutsByTime;
   window.cycleSortMode = cycleSortMode;
   window.filterGrants = filterGrants;
@@ -2781,4 +2718,3 @@ async function loadGrants() {
   window.toggleView = toggleView;
   window.showGrantDetails = showGrantDetails;
   window.closeModal = closeModal;
-  window.toggleDarkMode = toggleDarkMode;
