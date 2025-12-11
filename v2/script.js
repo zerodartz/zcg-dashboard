@@ -258,7 +258,6 @@ function navigateToTab(tabName, pushState = true) {
     loadPayoutsChart();
     loadCategoryChart();
     loadZecPriceTrend();
-    loadActivityMetrics();
     loadApprovedChart();
   }
 
