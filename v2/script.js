@@ -1344,35 +1344,41 @@ function cycleSortMode() {
 }
 
 function sortGrants() {
-  const mode = sortModes[currentSortMode];
-
-  switch (mode.key) {
-    case "newest":
-      filteredGrants.sort((a, b) => {
-        if (!a.lastPaidDate && !b.lastPaidDate) return 0;
-        if (!a.lastPaidDate) return 1;
-        if (!b.lastPaidDate) return -1;
-        return b.lastPaidDate - a.lastPaidDate;
-      });
-      break;
-    case "oldest":
-      filteredGrants.sort((a, b) => {
-        if (!a.lastPaidDate && !b.lastPaidDate) return 0;
-        if (!a.lastPaidDate) return -1;
-        if (!b.lastPaidDate) return 1;
-        return a.lastPaidDate - b.lastPaidDate;
-      });
-      break;
-    case "biggest":
-      filteredGrants.sort((a, b) => b.totalAmount - a.totalAmount);
-      break;
-    case "smallest":
-      filteredGrants.sort((a, b) => a.totalAmount - b.totalAmount);
-      break;
+    const mode = sortModes[currentSortMode];
+  
+    const getDate = (g) => g.lastPaidDate || g.submissionDate;
+  
+    switch (mode.key) {
+      case "newest":
+        filteredGrants.sort((a, b) => {
+          const dateA = getDate(a);
+          const dateB = getDate(b);
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return 1;
+          if (!dateB) return -1;
+          return dateB - dateA;
+        });
+        break;
+      case "oldest":
+        filteredGrants.sort((a, b) => {
+          const dateA = getDate(a);
+          const dateB = getDate(b);
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return -1;
+          if (!dateB) return 1;
+          return dateA - dateB;
+        });
+        break;
+      case "biggest":
+        filteredGrants.sort((a, b) => b.totalAmount - a.totalAmount);
+        break;
+      case "smallest":
+        filteredGrants.sort((a, b) => a.totalAmount - b.totalAmount);
+        break;
+    }
+  
+    renderGrants(filteredGrants);
   }
-
-  renderGrants(filteredGrants);
-}
 
 /* ===== Grant Filters ===== */
 function filterGrantsBySearch(query) {
