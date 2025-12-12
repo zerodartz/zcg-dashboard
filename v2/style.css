@@ -336,11 +336,12 @@
     display: flex;
     gap: 0.4rem;
     flex-wrap: wrap;
+    margin-bottom: 1rem;
   }
   
   .filter-tab {
     padding: 0.5rem 1rem;
-    background: var(--bg);
+    background: var(--border);
     border: none;
     border-radius: 8px;
     cursor: pointer;
