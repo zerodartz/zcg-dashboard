@@ -13,6 +13,7 @@ let currentStatusFilter = "all";
 let currentBudgetFilter = "all";
 let loadedTabs = new Set();
 let currentCategoryFilter = "all";
+let pendingGrantToOpen = null;
 
 // Payment filters
 let paidOutOriginal = [];
@@ -73,43 +74,52 @@ const tabRoutes = {
 
 /* ===== Navigation ===== */
 function showPage(pageName) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  
-  const targetPage = document.getElementById(pageName);
-  if (targetPage) targetPage.classList.add('active');
-  
-  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-  document.querySelectorAll('.bottom-nav-link').forEach(l => l.classList.remove('active'));
-  document.querySelectorAll(`[data-page="${pageName}"]`).forEach(l => l.classList.add('active'));
-  
-  if (!loadedTabs.has(pageName)) {
-    const tabInfo = tabRoutes[pageName];
-    if (tabInfo) {
-      tabInfo.load();
-      loadedTabs.add(pageName);
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    
+    const targetPage = document.getElementById(pageName);
+    if (targetPage) targetPage.classList.add('active');
+    
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.bottom-nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll(`[data-page="${pageName}"]`).forEach(l => l.classList.add('active'));
+    
+    // If we have a pending grant, make sure grants page loads
+    if (pendingGrantToOpen && !loadedTabs.has('grants')) {
+      loadGrants();
+      loadedTabs.add('grants');
     }
+    
+    if (!loadedTabs.has(pageName)) {
+      const tabInfo = tabRoutes[pageName];
+      if (tabInfo) {
+        tabInfo.load();
+        loadedTabs.add(pageName);
+      }
+    }
+    
+    if (pageName === "dashboard" && loadedTabs.has("dashboard")) {
+      loadPayoutsChart();
+      loadCategoryChart();
+      loadZecPriceTrend();
+      loadApprovedChart();
+    }
+    
+    // Don't update history if we have a grant param
+    if (!window.location.hash.includes('grant=')) {
+      history.pushState({ page: pageName }, "", `#${pageName}`);
+    }
+    
+    const titles = {
+      dashboard: "Dashboard",
+      grants: "Grants",
+      payments: "Payments",
+      auditpayments: "Audit Payments",
+      liquidity: "Maya Liquidity",
+      stipends: "Stipends",
+      notetaker: "Notetaker Payments"
+    };
+    document.title = `${titles[pageName] || "Dashboard"} - Zcash Community Grants`;
   }
-  
-  if (pageName === "dashboard" && loadedTabs.has("dashboard")) {
-    loadPayoutsChart();
-    loadCategoryChart();
-    loadZecPriceTrend();
-    loadApprovedChart();
-  }
-  
-  history.pushState({ page: pageName }, "", `#${pageName}`);
-  
-  const titles = {
-    dashboard: "Dashboard",
-    grants: "Grants",
-    payments: "Payments",
-    auditpayments: "Audit Payments",
-    liquidity: "Maya Liquidity",
-    stipends: "Stipends",
-    notetaker: "Notetaker Payments"
-  };
-  document.title = `${titles[pageName] || "Dashboard"} - Zcash Community Grants`;
-}
 
 function initNavigation() {
   document.querySelectorAll('.nav-link').forEach(link => {
@@ -136,9 +146,21 @@ function initNavigation() {
 }
 
 function getPageFromHash() {
-  const hash = window.location.hash.substring(1);
-  return tabRoutes[hash] ? hash : "dashboard";
-}
+    const hash = window.location.hash.substring(1);
+    const basePage = hash.split('?')[0];
+    return tabRoutes[basePage] ? basePage : "dashboard";
+  }
+
+function checkPendingGrant() {
+    const hash = window.location.hash;
+    if (hash.includes('grant=')) {
+      const params = new URLSearchParams(hash.split('?')[1]);
+      const grantId = params.get('grant');
+      if (grantId) {
+        pendingGrantToOpen = decodeGrantId(grantId);
+      }
+    }
+  }
 
 /* ===== Theme Toggle ===== */
 function initThemeToggle() {
@@ -420,22 +442,23 @@ document.addEventListener("keydown", (e) => {
 
 /* ===== Single DOMContentLoaded - FIXED ===== */
 document.addEventListener("DOMContentLoaded", () => {
-  initThemeToggle();
-  initNavigation();
-  initGrantsFilters();
-  initDashboardFilters();
-  setupSearch();
-  startUpdateTimeFallback();
-
-  const modalOverlay = document.getElementById("modalOverlay");
-  if (modalOverlay) {
-    modalOverlay.addEventListener("click", (e) => {
-      if (e.target === modalOverlay) {
-        closeModal();
-      }
-    });
-  }
-});
+    checkPendingGrant();  // <-- ADD THIS FIRST
+    initThemeToggle();
+    initNavigation();
+    initGrantsFilters();
+    initDashboardFilters();
+    setupSearch();
+    startUpdateTimeFallback();
+  
+    const modalOverlay = document.getElementById("modalOverlay");
+    if (modalOverlay) {
+      modalOverlay.addEventListener("click", (e) => {
+        if (e.target === modalOverlay) {
+          closeModal();
+        }
+      });
+    }
+  });
 
 /* ===== Compute Grant Stats ===== */
 async function computeGrantStats() {
@@ -1942,25 +1965,30 @@ function closeModal() {
   }
 
   function openGrantFromURL() {
-    const hash = window.location.hash;
-    if (!hash.includes('grant=')) return false;
+    if (!pendingGrantToOpen) {
+      // Check URL directly as fallback
+      const hash = window.location.hash;
+      if (!hash.includes('grant=')) return false;
+      
+      const params = new URLSearchParams(hash.split('?')[1]);
+      const grantId = params.get('grant');
+      if (!grantId) return false;
+      
+      pendingGrantToOpen = decodeGrantId(grantId);
+    }
     
-    const params = new URLSearchParams(hash.split('?')[1]);
-    const grantId = params.get('grant');
-    if (!grantId) return false;
+    if (!pendingGrantToOpen) return false;
     
-    const decoded = decodeGrantId(grantId);
-    if (!decoded) return false;
-    
-    // Find grant and open modal
     const grant = allGrants.find(
-      (g) => g.project === decoded.project && g.grantee === decoded.grantee
+      (g) => g.project === pendingGrantToOpen.project && g.grantee === pendingGrantToOpen.grantee
     );
     
     if (grant) {
+      pendingGrantToOpen = null;  // Clear it
       showGrantDetails(grant.project, grant.grantee);
       return true;
     }
+    
     return false;
   }
 
