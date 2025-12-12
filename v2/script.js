@@ -2135,7 +2135,6 @@ async function loadLiquidity() {
 }
 
 /* ===== STIPENDS ===== */
-
 async function loadStipends() {
     try {
       await loadWorkbook();
@@ -2144,11 +2143,6 @@ async function loadStipends() {
       const monthly = {};
       let totalUSDYTD = 0;
       let totalZECYTD = 0;
-      const MEMBERS = 5;
-      const perMemberUsdYTD = totalUSDYTD / MEMBERS;
-const avgMonths =
-  months.length > 0 ? months.length : 1;
-const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
   
       rows.forEach((r) => {
         const date = toDate(r["Date"]);
@@ -2159,27 +2153,22 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
           year: "numeric"
         });
   
+        // USD column: target value, even if actually paid in ZEC
         const usd = cleanNumber(r["USD Amount"]);
         const zec =
           cleanNumber(r["ZEC Amount"]) ||
           cleanNumber(r["ZEC"]) ||
           0;
-        const zecUsdRate = cleanNumber(r["ZEC/USD"]) || 0;
   
         if (!monthly[monthKey]) {
           monthly[monthKey] = {
             usd: 0,
-            zec: 0,
-            zecUsdRateSamples: [],
-            fixed10ZecUsd: 0 // optional, for line 3
+            zec: 0
           };
         }
   
         monthly[monthKey].usd += usd;
         monthly[monthKey].zec += zec;
-        if (zecUsdRate) {
-          monthly[monthKey].zecUsdRateSamples.push(zecUsdRate);
-        }
   
         totalUSDYTD += usd;
         totalZECYTD += zec;
@@ -2189,48 +2178,46 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
       const usdAllMembers = months.map((m) => monthly[m].usd);
       const zecAllMembers = months.map((m) => monthly[m].zec);
   
-      //3rd line: fixed 10 ZEC per person, valued in USD
-      const FIXED_ZEC_PER_PERSON = 10;
-      const fixed10ZecUsd = months.map((m) => {
-        const entry = monthly[m];
-        const avgRate =
-          entry.zecUsdRateSamples.length
-            ? entry.zecUsdRateSamples.reduce((a, b) => a + b, 0) /
-              entry.zecUsdRateSamples.length
-            : 0;
-        return avgRate
-          ? FIXED_ZEC_PER_PERSON * avgRate
-          : 0;
-      });
+      // Per‑member stats (USD view only)
+      const MEMBERS = 5;
+      const perMemberUsdYTD = totalUSDYTD / MEMBERS;
+      const avgMonths = months.length > 0 ? months.length : 1;
+      const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
   
       document.getElementById("stipendsContent").innerHTML = `
         <div class="stipends-cards">
           <div class="stipend-card">
-            <div class="stipend-label">Total in USD Paid YTD</div>
+            <div class="stipend-label">Total Stipend Value YTD (USD)</div>
             <div class="stipend-value">${formatUSD(totalUSDYTD)}</div>
           </div>
           <div class="stipend-card">
-            <div class="stipend-label">Total in ZEC Paid YTD</div>
+            <div class="stipend-label">Total Paid YTD (ZEC units)</div>
             <div class="stipend-value">${formatZEC(totalZECYTD)}</div>
           </div>
           <div class="stipend-card">
-      <div class="stipend-label">Per Member YTD combined ZEC+USD</div>
-      <div class="stipend-value">${formatUSD(perMemberUsdYTD)}</div>
-    </div>
-    <div class="stipend-card">
-      <div class="stipend-label">Avg Per Member / Month (USD)</div>
-      <div class="stipend-value">${formatUSD(avgPerMemberPerMonth)}</div>
-    </div>
+            <div class="stipend-label">Per Member YTD (USD value)</div>
+            <div class="stipend-value">${formatUSD(perMemberUsdYTD)}</div>
+          </div>
+          <div class="stipend-card">
+            <div class="stipend-label">Avg Per Member / Month (USD value)</div>
+            <div class="stipend-value">${formatUSD(avgPerMemberPerMonth)}</div>
+          </div>
         </div>
         <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
-          Lines show total USD cash and total ZEC stipends paid to 5 members combined per
-          month. The dashed line shows the USD value of the fixed
-          10&nbsp;ZEC per committee member per month the rest is fixed USD amount $1725.
+          5 committee members each receive a stipend worth
+          <strong>$1,725 USD + 10 ZEC</strong> per month. In practice, the USD
+          portion is paid in ZEC at the payout exchange rate, so the chart shows:
+          <br/>
+          • total stipend value per month in USD (from the sheet), and<br/>
+          • total ZEC units paid per month.
+          <br/>
+          These are two views of the same payouts; the ZEC line should
+          <em>not</em> be added to the USD line.
         </p>
         <div class="stipends-chart-wrapper">
-          <div class="stipends-chart-title">Committee Stipends (Total combined all 5 Members)</div>
+          <div class="stipends-chart-title">Committee Stipends (All 5 Members)</div>
           <div class="stipends-chart-subtitle">
-            USD cash, ZEC units, and USD value of 10 ZEC/member
+            USD value vs. ZEC units paid (same underlying payouts)
           </div>
           <div class="chart-container">
             <canvas id="stipendsChart"></canvas>
@@ -2238,11 +2225,12 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
         </div>
       `;
   
+      // Two-line chart: USD value + ZEC units
       renderStipendsChart(
         months,
         usdAllMembers,
         zecAllMembers,
-        fixed10ZecUsd // you can pass null/[] if you don’t want line 3
+        null // no dashed 3rd line
       );
     } catch (error) {
       console.error(error);
@@ -2250,23 +2238,23 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
         '<div class="loading-placeholder">Error loading stipends data</div>';
     }
   }
-
   function renderStipendsChart(
     months,
     usdAllMembers,
     zecAllMembers,
-    fixed10ZecUsdLine // array same length as months, or []/null to disable
+    fixed10ZecUsdLine // null/[] means "no 3rd line"
   ) {
     const ctx = document.getElementById("stipendsChart");
     if (!ctx) return;
     if (ctx.chart) ctx.chart.destroy();
   
     const hasFixedLine =
-      Array.isArray(fixed10ZecUsdLine) && fixed10ZecUsdLine.length === months.length;
+      Array.isArray(fixed10ZecUsdLine) &&
+      fixed10ZecUsdLine.length === months.length;
   
     const datasets = [
       {
-        label: "USD paid (all members)",
+        label: "Stipend value (USD, all members)",
         data: usdAllMembers,
         borderColor: "#4caf50",
         backgroundColor: "rgba(76, 175, 80, 0.1)",
@@ -2275,7 +2263,7 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
         yAxisID: "yUSD"
       },
       {
-        label: "ZEC paid (all members)",
+        label: "Stipend paid (ZEC, all members)",
         data: zecAllMembers,
         borderColor: "#f3a622",
         backgroundColor: "rgba(243, 166, 34, 0.1)",
@@ -2312,7 +2300,7 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
           yUSD: {
             type: "linear",
             position: "left",
-            title: { display: true, text: "USD" },
+            title: { display: true, text: "USD value" },
             beginAtZero: true,
             grid: {
               color: getComputedStyle(document.documentElement)
@@ -2329,7 +2317,7 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
           yZEC: {
             type: "linear",
             position: "right",
-            title: { display: true, text: "ZEC" },
+            title: { display: true, text: "ZEC units" },
             beginAtZero: true,
             grid: { drawOnChartArea: false },
             ticks: {
@@ -2349,12 +2337,12 @@ const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
                 const i = context.dataIndex;
                 const label = context.dataset.label || "";
   
-                if (label.startsWith("USD paid")) {
+                if (label.startsWith("Stipend value (USD")) {
                   const usd = usdAllMembers[i] || 0;
-                  return `USD paid: ${formatUSD(usd)}`;
+                  return `USD value: ${formatUSD(usd)}`;
                 }
   
-                if (label.startsWith("ZEC paid")) {
+                if (label.startsWith("Stipend paid (ZEC")) {
                   const zec = zecAllMembers[i] || 0;
                   return `ZEC paid: ${formatZEC(zec)}`;
                 }
