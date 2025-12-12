@@ -1129,96 +1129,78 @@ function getDecisionStatus(rawDecision) {
   
     if (!s) return "unknown";
   
-    // Canonical normalized sets
     if (s.includes("approved")) return "approved";
   
-    if (
-      s.includes("reject") ||
-      s.includes("decline") ||
-      s === "no" ||
-      s === "not approved"
-    ) {
-      return "rejected";
-    }
-  
+    // Column F contains "Rejected", "Filtered by FPF", "Discussion Required", etc.
+    if (s.includes("reject") || s.includes("decline")) return "rejected";
     if (s.includes("withdraw")) return "withdrawn";
     if (s.includes("filter")) return "filtered";
   
-    // Discussion / no final decision variants
-    if (
-      s.includes("discussion") ||
-      s.includes("needs more discussion") ||
-      s.includes("needs discussion") ||
-      s.includes("tabled") ||
-      s.includes("pending") ||
-      s.includes("under review") ||
-      s.includes("deferred")
-    ) {
-      return "discussion";
-    }
+    if (s.includes("discussion")) return "discussion";
   
     return "unknown";
   }
 
-function buildProjectMetaFromAllGrants() {
-  const aoa = sheetToAoA(SHEETS.ALL_GRANTS);
-  const meta = {};
-
-  if (!aoa.length) return meta;
-
-  const headers = (aoa[0] || []).map((h) =>
-    (h || "").toString().replace(/\u00A0/g, " ").trim()
-  );
-  const normHeaders = headers.map((h) => h.toLowerCase().replace(/\s+/g, " "));
-
-  const colDate = 0; // you already assume date col 0 in several places
-  const colTitle = 1; // title / project name
-  const colDecision = 5; // same as COL_DECISION in loadApprovedChart
-
-  // Try to locate "Forum Link" column
-  const forumIdx =
-    normHeaders.findIndex((h) => h.includes("forum") && h.includes("link")) ??
-    -1;
-
-  for (let i = 1; i < aoa.length; i++) {
-    const row = aoa[i] || [];
-    const rawTitle = (row[colTitle] || "").toString().trim();
-    const d = toDate(row[colDate]);
-
-    if (!rawTitle) continue;
-
-    const key = rawTitle
-      .toLowerCase()
-      .replace(/\u00A0/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const decisionRaw = row[colDecision];
-    const forumLink =
-      forumIdx >= 0 ? (row[forumIdx] || "").toString().trim() : "";
-
-    const existing = meta[key] || {};
-    // Earliest submission date wins
-    const submissionDate =
-      existing.submissionDate && d
-        ? d < existing.submissionDate
-          ? d
-          : existing.submissionDate
-        : d || existing.submissionDate || null;
-
-    const decisionStatus = getDecisionStatus(
-      decisionRaw != null ? decisionRaw : existing.decisionRaw
+  function buildProjectMetaFromAllGrants() {
+    const aoa = sheetToAoA(SHEETS.ALL_GRANTS);
+    const meta = {};
+  
+    if (!aoa.length) return meta;
+  
+    const headers = (aoa[0] || []).map((h) =>
+      (h || "").toString().replace(/\u00A0/g, " ").trim()
     );
-
-    meta[key] = {
-      submissionDate,
-      decisionStatus,
-      forumLink: forumLink || existing.forumLink || null
-    };
+    const normHeaders = headers.map((h) =>
+      h.toLowerCase().replace(/\s+/g, " ")
+    );
+  
+    const COL_DATE = 0;
+    const COL_TITLE = 1;
+    const COL_DECISION = 5;
+  
+    // Find "Forum Link" column by name
+    const forumIdx = normHeaders.findIndex(
+      (h) => h.includes("forum") && h.includes("link")
+    );
+  
+    for (let i = 1; i < aoa.length; i++) {
+      const row = aoa[i] || [];
+      const rawTitle = (row[COL_TITLE] || "").toString().trim();
+      if (!rawTitle) continue;
+  
+      const d = toDate(row[COL_DATE]);
+      const decisionRaw = row[COL_DECISION];
+      const forumLink =
+        forumIdx >= 0 ? (row[forumIdx] || "").toString().trim() : "";
+  
+      const key = rawTitle
+        .toLowerCase()
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+  
+      const existing = meta[key] || {};
+  
+      const submissionDate =
+        existing.submissionDate && d
+          ? d < existing.submissionDate
+            ? d
+            : existing.submissionDate
+          : d || existing.submissionDate || null;
+  
+      const decisionStatus = getDecisionStatus(
+        decisionRaw != null ? decisionRaw : existing.decisionRaw
+      );
+  
+      meta[key] = {
+        submissionDate,
+        decisionStatus,
+        forumLink: forumLink || existing.forumLink || null
+      };
+    }
+  
+    return meta;
   }
-
-  return meta;
-}
 
 async function loadGrants() {
   try {
@@ -1253,20 +1235,21 @@ async function loadGrants() {
           .replace(/\u00A0/g, " ")
           .replace(/\s+/g, " ")
           .trim();
-        const meta = projectMeta[normTitle] || {};
       
-        projectMap[key] = {
-          project: projectTitle,
-          grantee,
-          totalAmount: 0,
-          paidAmount: 0,
-          milestones: [],
-          lastPaidDate: null,
-          category: "",
-          submissionDate: meta.submissionDate || null,
-          decisionStatus: meta.decisionStatus || "unknown",
-          forumLink: meta.forumLink || null
-        };
+          const meta = projectMeta[normTitle] || {};
+
+          projectMap[key] = {
+            project: projectTitle,
+            grantee,
+            totalAmount: 0,
+            paidAmount: 0,
+            milestones: [],
+            lastPaidDate: null,
+            category: "",
+            submissionDate: meta.submissionDate || null,
+            decisionStatus: meta.decisionStatus || "unknown",
+            forumLink: meta.forumLink || null
+          };
       }
 
       const cat = (row[categoryHeader] || "").toString().replace(/\u00A0/g, " ").trim();
@@ -1301,15 +1284,15 @@ async function loadGrants() {
         else if (completedMilestones > 0) status = "in-progress";
         else status = "waiting";
         return {
-          ...grant,
-          status,
-          completedMilestones,
-          totalMilestones,
-          category: grant.category || "",
-          submissionDate: grant.submissionDate || null,
-          decisionStatus: grant.decisionStatus || "unknown",
-          forumLink: grant.forumLink || null
-        };
+            ...grant,
+            status,
+            completedMilestones,
+            totalMilestones,
+            category: grant.category || "",
+            submissionDate: grant.submissionDate || null,
+            decisionStatus: grant.decisionStatus || "unknown",
+            forumLink: grant.forumLink || null
+          };
       });
 
     filteredGrants = [...allGrants];
@@ -2182,14 +2165,15 @@ async function loadStipends() {
           monthly[monthKey] = {
             usd: 0,
             zec: 0,
-            usdEquivFromZec: 0
+            zecUsdRateSamples: [],
+            fixed10ZecUsd: 0 // optional, for line 3
           };
         }
   
         monthly[monthKey].usd += usd;
         monthly[monthKey].zec += zec;
-        if (zec && zecUsdRate) {
-          monthly[monthKey].usdEquivFromZec += zec * zecUsdRate;
+        if (zecUsdRate) {
+          monthly[monthKey].zecUsdRateSamples.push(zecUsdRate);
         }
   
         totalUSDYTD += usd;
@@ -2199,36 +2183,42 @@ async function loadStipends() {
       const months = Object.keys(monthly);
       const usdAllMembers = months.map((m) => monthly[m].usd);
       const zecAllMembers = months.map((m) => monthly[m].zec);
-      const totalAllMembersUsdEquivalent = months.map(
-        (m) => monthly[m].usd + monthly[m].usdEquivFromZec
-      );
-      const members = 5;
+  
+      // Optional 3rd line: fixed 10 ZEC per person, valued in USD
+      const MEMBERS = 5;
+      const FIXED_ZEC_PER_PERSON = 10;
+      const fixed10ZecUsd = months.map((m) => {
+        const entry = monthly[m];
+        const avgRate =
+          entry.zecUsdRateSamples.length
+            ? entry.zecUsdRateSamples.reduce((a, b) => a + b, 0) /
+              entry.zecUsdRateSamples.length
+            : 0;
+        return avgRate
+          ? FIXED_ZEC_PER_PERSON * MEMBERS * avgRate
+          : 0;
+      });
   
       document.getElementById("stipendsContent").innerHTML = `
         <div class="stipends-cards">
           <div class="stipend-card">
-            <div class="stipend-label">Total Paid YTD (USD cash)</div>
+            <div class="stipend-label">Total USD Paid YTD</div>
             <div class="stipend-value">${formatUSD(totalUSDYTD)}</div>
           </div>
           <div class="stipend-card">
             <div class="stipend-label">Total ZEC Paid YTD</div>
             <div class="stipend-value">${formatZEC(totalZECYTD)}</div>
           </div>
-          <div class="stipend-card">
-            <div class="stipend-label">Per Member USD Cash YTD</div>
-            <div class="stipend-value">${formatUSD(totalUSDYTD / members)}</div>
-          </div>
         </div>
         <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
-          Committee stipend structure is a mix of USD and ZEC. The chart below shows
-          total amounts per month for all members combined. Values for ZEC are also
-          shown in ZEC units; when available, USD equivalents are computed using the
-          payout ZEC/USD rate.
+          Lines show total USD cash and total ZEC stipends paid to all members per
+          month. The dashed line (if present) shows the USD value of the fixed
+          10&nbsp;ZEC per committee member.
         </p>
         <div class="stipends-chart-wrapper">
           <div class="stipends-chart-title">Committee Stipends (All Members)</div>
           <div class="stipends-chart-subtitle">
-            USD cash, ZEC units, and total compensation in USD equivalent
+            USD cash, ZEC units, and optional USD value of 10 ZEC/member
           </div>
           <div class="chart-container">
             <canvas id="stipendsChart"></canvas>
@@ -2240,7 +2230,7 @@ async function loadStipends() {
         months,
         usdAllMembers,
         zecAllMembers,
-        totalAllMembersUsdEquivalent
+        fixed10ZecUsd // you can pass null/[] if you don’t want line 3
       );
     } catch (error) {
       console.error(error);
@@ -2249,50 +2239,58 @@ async function loadStipends() {
     }
   }
 
-function renderStipendsChart(
+  function renderStipendsChart(
     months,
     usdAllMembers,
     zecAllMembers,
-    totalAllMembersUsdEquivalent
+    fixed10ZecUsdLine // array same length as months, or []/null to disable
   ) {
     const ctx = document.getElementById("stipendsChart");
     if (!ctx) return;
     if (ctx.chart) ctx.chart.destroy();
   
+    const hasFixedLine =
+      Array.isArray(fixed10ZecUsdLine) && fixed10ZecUsdLine.length === months.length;
+  
+    const datasets = [
+      {
+        label: "USD paid (all members)",
+        data: usdAllMembers,
+        borderColor: "#4caf50",
+        backgroundColor: "rgba(76, 175, 80, 0.1)",
+        tension: 0.3,
+        fill: true,
+        yAxisID: "yUSD"
+      },
+      {
+        label: "ZEC paid (all members)",
+        data: zecAllMembers,
+        borderColor: "#f3a622",
+        backgroundColor: "rgba(243, 166, 34, 0.1)",
+        tension: 0.3,
+        fill: true,
+        yAxisID: "yZEC"
+      }
+    ];
+  
+    if (hasFixedLine) {
+      datasets.push({
+        label: "USD value of fixed 10 ZEC/member",
+        data: fixed10ZecUsdLine,
+        borderColor: "#e91e63",
+        backgroundColor: "rgba(233, 30, 99, 0.05)",
+        tension: 0.3,
+        fill: false,
+        yAxisID: "yUSD",
+        borderDash: [5, 4]
+      });
+    }
+  
     ctx.chart = new Chart(ctx, {
       type: "line",
       data: {
         labels: months,
-        datasets: [
-          {
-            label: "USD paid (all members)",
-            data: usdAllMembers,
-            borderColor: "#4caf50",
-            backgroundColor: "rgba(76, 175, 80, 0.1)",
-            tension: 0.3,
-            fill: true,
-            yAxisID: "yUSD"
-          },
-          {
-            label: "ZEC paid (all members)",
-            data: zecAllMembers,
-            borderColor: "#f3a622",
-            backgroundColor: "rgba(243, 166, 34, 0.1)",
-            tension: 0.3,
-            fill: true,
-            yAxisID: "yZEC"
-          },
-          {
-            label: "Total comp (USD equiv., all members)",
-            data: totalAllMembersUsdEquivalent,
-            borderColor: "#e91e63",
-            backgroundColor: "rgba(233, 30, 99, 0.1)",
-            tension: 0.3,
-            fill: false,
-            yAxisID: "yUSD",
-            borderDash: [5, 4]
-          }
-        ]
+        datasets
       },
       options: {
         ...getChartOptions(),
@@ -2337,27 +2335,24 @@ function renderStipendsChart(
             callbacks: {
               label: function (context) {
                 const i = context.dataIndex;
-                const dsLabel = context.dataset.label || "";
-                if (dsLabel.startsWith("USD paid")) {
+                const label = context.dataset.label || "";
+  
+                if (label.startsWith("USD paid")) {
                   const usd = usdAllMembers[i] || 0;
                   return `USD paid: ${formatUSD(usd)}`;
                 }
-                if (dsLabel.startsWith("ZEC paid")) {
+  
+                if (label.startsWith("ZEC paid")) {
                   const zec = zecAllMembers[i] || 0;
                   return `ZEC paid: ${formatZEC(zec)}`;
                 }
-                if (dsLabel.startsWith("Total comp")) {
-                  const usd = usdAllMembers[i] || 0;
-                  const zec = zecAllMembers[i] || 0;
-                  const total = totalAllMembersUsdEquivalent[i] || 0;
-                  const zecUsdEquiv = total - usd;
-                  return [
-                    `Total: ${formatUSD(total)}`,
-                    `  - USD cash: ${formatUSD(usd)}`,
-                    `  - ZEC: ${formatUSD(zecUsdEquiv)} (for ${formatZEC(zec)})`
-                  ];
+  
+                if (label.startsWith("USD value of fixed 10 ZEC")) {
+                  const v = fixed10ZecUsdLine[i] || 0;
+                  return `10 ZEC/member (USD): ${formatUSD(v)}`;
                 }
-                return `${dsLabel}: ${context.formattedValue}`;
+  
+                return `${label}: ${context.formattedValue}`;
               }
             }
           }
