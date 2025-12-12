@@ -1325,15 +1325,32 @@ for (let i = 1; i < allAoA.length; i++) {
         forumLink: grant.forumLink || null
       };
     });
-    
-    applyFilters();  // This now handles the filtering correctly
+
+    readFiltersFromURL();
+    applyFilters();
     setupCategoryFilters();
+    openGrantFromURL();  // <-- ADD THIS
   } catch (error) {
     console.error("Error in loadGrants:", error);
     document.getElementById("grantsContainer").innerHTML =
       '<div class="loading-placeholder">Error loading grants data</div>';
   }
 }
+
+/* ===== URL sharing ===== */
+function encodeGrantId(project, grantee) {
+    return encodeURIComponent(`${project}::${grantee}`);
+  }
+  
+  function decodeGrantId(id) {
+    const decoded = decodeURIComponent(id);
+    const parts = decoded.split('::');
+    if (parts.length >= 2) {
+      return { project: parts[0], grantee: parts.slice(1).join('::') };
+    }
+    return null;
+  }
+
 
 
 /* ===== Grant Sorting ===== */
@@ -1703,129 +1720,146 @@ function extractProjectSummary(markdown) {
 }
 
 async function showGrantDetails(project, grantee) {
-  const grant = allGrants.find((g) => g.project === project && g.grantee === grantee);
-  if (!grant) return;
-
-  const progressPercent = grant.totalMilestones > 0
-    ? (grant.completedMilestones / grant.totalMilestones) * 100
-    : 0;
-
-  const paidMilestones = grant.milestones.filter((m) => !!m.paidDate);
-  const futureMilestones = grant.milestones.filter((m) => !m.paidDate);
-
-  const renderPaid = (m, i) => `
-    <div class="milestone-item">
-      <span>#${i + 1} — ${formatUSD(m.amount)}</span>
-      <span style="color:var(--success);">Paid ${fmtDateCell(m.paidDate)}</span>
-    </div>
-  `;
-
-  const renderFuture = (m, i) => {
-    const est = fmtDateCell(m.estimate);
-    const due = fmtDateCell(m.dueDate);
-    const label = est || due ? (est ? `Est. ${est}` : `Due ${due}`) : "Date TBA";
-    return `
+    const grant = allGrants.find((g) => g.project === project && g.grantee === grantee);
+    if (!grant) return;
+  
+    // Update URL with grant param
+    const grantId = encodeGrantId(project, grantee);
+    history.replaceState({ page: 'grants', grant: grantId }, '', `#grants?grant=${grantId}`);
+  
+    const progressPercent = grant.totalMilestones > 0
+      ? (grant.completedMilestones / grant.totalMilestones) * 100
+      : 0;
+  
+    const paidMilestones = grant.milestones.filter((m) => !!m.paidDate);
+    const futureMilestones = grant.milestones.filter((m) => !m.paidDate);
+  
+    const renderPaid = (m, i) => `
       <div class="milestone-item">
         <span>#${i + 1} — ${formatUSD(m.amount)}</span>
-        <span style="color: var(--text-tertiary);">${label}</span>
+        <span style="color:var(--success);">Paid ${fmtDateCell(m.paidDate)}</span>
       </div>
     `;
-  };
-
-  let content = `
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
-    <h2 style="font-size:1.25rem;font-weight:700;margin:0;">${project}</h2>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-      <span id="forumBtnSlot"></span>
-      <span id="githubBtnSlot"></span>
-    </div>
-  </div>
-    <div class="progress-bar" style="margin: 12px 0;">
-      <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
-    </div>
-    <div style="color:var(--text-secondary);margin-bottom:1rem;">${grantee}</div>
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.85rem;">
-      ${grant.submissionDate ? `<span><strong>Opened:</strong> ${new Date(grant.submissionDate).toLocaleDateString()}</span>` : ""}
-      <span><strong>Budget:</strong> ${formatUSD(grant.paidAmount)} / ${formatUSD(grant.totalAmount)}</span>
-      ${grant.lastPaidDate ? `<span><strong>Last Payment:</strong> ${fmtDateCell(grant.lastPaidDate)}</span>` : ""}
-      <span><strong>Milestones:</strong> ${grant.completedMilestones}/${grant.totalMilestones}</span>
-    </div>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
-  ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
-  ${(grant.decisionStatus !== "rejected" && grant.decisionStatus !== "discussion")
-    ? `<span class="grant-status ${grant.status}">${grant.status.replace("-", " ").toUpperCase()}</span>`
-    : `<span class="grant-status ${grant.decisionStatus === "discussion" ? "discussion" : "declined"}">
-        ${grant.decisionStatus === "discussion" ? "DISCUSSION REQUIRED" : "DECLINED"}
-       </span>`
-  }
-</div>
-    <div id="githubSection" style="margin-bottom:1.5rem;">
-      <div style="color:var(--text-tertiary);font-size:0.85rem;">Loading GitHub details...</div>
-    </div>
-    ${paidMilestones.length ? `
-      <h3 style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.75rem;">Paid Milestones</h3>
-      <div class="milestone-list">
-        ${paidMilestones.map((m, idx) => renderPaid(m, idx)).join("")}
+  
+    const renderFuture = (m, i) => {
+      const est = fmtDateCell(m.estimate);
+      const due = fmtDateCell(m.dueDate);
+      const label = est || due ? (est ? `Est. ${est}` : `Due ${due}`) : "Date TBA";
+      return `
+        <div class="milestone-item">
+          <span>#${i + 1} — ${formatUSD(m.amount)}</span>
+          <span style="color: var(--text-tertiary);">${label}</span>
+        </div>
+      `;
+    };
+  
+    let content = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+      <h2 style="font-size:1.25rem;font-weight:700;margin:0;">${project}</h2>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button class="github-btn" id="shareGrantBtn" title="Copy link to this grant">
+          🔗 Share
+        </button>
+        <span id="forumBtnSlot"></span>
+        <span id="githubBtnSlot"></span>
       </div>
-    ` : ""}
-    ${futureMilestones.length ? `
-      <h3 style="font-size:0.9rem;color:var(--text-secondary);margin:1rem 0 0.75rem;">Future Milestones</h3>
-      <div class="milestone-list">
-        ${futureMilestones.map((m, idx) => renderFuture(m, idx + paidMilestones.length)).join("")}
+    </div>
+      <div class="progress-bar" style="margin: 12px 0;">
+        <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
       </div>
-    ` : ""}
-  `;
-
-  openModal(content);
-
-  // Load GitHub data
-  const issue = await findGitHubIssueByTitle(grant.project);
-  const githubContainer = document.getElementById("githubSection");
-  const btnSlot = document.getElementById("githubBtnSlot");
-  const forumSlot = document.getElementById("forumBtnSlot");
-if (forumSlot && grant.forumLink) {
-  forumSlot.innerHTML = `
-    <a class="github-btn" href="${grant.forumLink}" target="_blank" rel="noopener">
-      Forum
-    </a>
-  `;
-}
-
-  if (issue) {
-    const issueData = await fetchGitHubIssueBody(issue.number);
-
-    if (btnSlot && issueData && issueData.html_url) {
-      btnSlot.innerHTML = `
-        <a class="github-btn github-btn--accent" href="${issueData.html_url}" target="_blank" rel="noopener">
-          <svg viewBox="0 0 16 16" style="width:16px;height:16px;fill:currentColor;">
-            <path d="M8 .2a8 8 0 00-2.53 15.6c.4.07.55-.17.55-.38 0-.18-.01-.78-.01-1.42-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.12-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.58.82-2.14-.08-.2-.36-1.01.08-2.1 0 0 .67-.21 2.2.82a7.6 7.6 0 012 0c1.53-1.03 2.2-.82 2.2-.82.44 1.09.16 1.9.08 2.1.51.56.82 1.27.82 2.14 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.22 0 .21.15.46.55.38A8 8 0 008 .2z"></path>
-          </svg>
-          View on GitHub
+      <div style="color:var(--text-secondary);margin-bottom:1rem;">${grantee}</div>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.85rem;">
+        ${grant.submissionDate ? `<span><strong>Opened:</strong> ${new Date(grant.submissionDate).toLocaleDateString()}</span>` : ""}
+        <span><strong>Budget:</strong> ${formatUSD(grant.paidAmount)} / ${formatUSD(grant.totalAmount)}</span>
+        ${grant.lastPaidDate ? `<span><strong>Last Payment:</strong> ${fmtDateCell(grant.lastPaidDate)}</span>` : ""}
+        <span><strong>Milestones:</strong> ${grant.completedMilestones}/${grant.totalMilestones}</span>
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+        ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
+        ${(grant.decisionStatus !== "rejected" && grant.decisionStatus !== "discussion")
+          ? `<span class="grant-status ${grant.status}">${grant.status.replace("-", " ").toUpperCase()}</span>`
+          : `<span class="grant-status ${grant.decisionStatus === "discussion" ? "discussion" : "declined"}">
+              ${grant.decisionStatus === "discussion" ? "DISCUSSION REQUIRED" : "DECLINED"}
+             </span>`
+        }
+      </div>
+      <div id="githubSection" style="margin-bottom:1.5rem;">
+        <div style="color:var(--text-tertiary);font-size:0.85rem;">Loading GitHub details...</div>
+      </div>
+      ${paidMilestones.length ? `
+        <h3 style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.75rem;">Paid Milestones</h3>
+        <div class="milestone-list">
+          ${paidMilestones.map((m, idx) => renderPaid(m, idx)).join("")}
+        </div>
+      ` : ""}
+      ${futureMilestones.length ? `
+        <h3 style="font-size:0.9rem;color:var(--text-secondary);margin:1rem 0 0.75rem;">Future Milestones</h3>
+        <div class="milestone-list">
+          ${futureMilestones.map((m, idx) => renderFuture(m, idx + paidMilestones.length)).join("")}
+        </div>
+      ` : ""}
+    `;
+  
+    openModal(content);
+  
+    // Add share button listener
+    document.getElementById("shareGrantBtn")?.addEventListener("click", () => {
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        const btn = document.getElementById("shareGrantBtn");
+        btn.innerHTML = "✓ Copied!";
+        setTimeout(() => btn.innerHTML = "🔗 Share", 2000);
+      });
+    });
+  
+    // Load GitHub data (rest of existing code...)
+    const issue = await findGitHubIssueByTitle(grant.project);
+    const githubContainer = document.getElementById("githubSection");
+    const btnSlot = document.getElementById("githubBtnSlot");
+    const forumSlot = document.getElementById("forumBtnSlot");
+  
+    if (forumSlot && grant.forumLink) {
+      forumSlot.innerHTML = `
+        <a class="github-btn" href="${grant.forumLink}" target="_blank" rel="noopener">
+          Forum
         </a>
       `;
     }
-
-    if (issueData && issueData.body && githubContainer) {
-      const summary = extractProjectSummary(issueData.body);
-      if (summary) {
-        const maxChars = 800;
-        const plain = summary.replace(/[#*`>\[\]()]/g, "").trim();
-        const truncated = plain.length > maxChars ? plain.slice(0, maxChars) + "..." : plain;
-        githubContainer.innerHTML = `
-          <h3 style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.5rem;">Project Summary</h3>
-          <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.6;">${truncated}</p>
-          ${plain.length > maxChars ? `<a href="${issueData.html_url}" target="_blank" style="color:var(--accent-secondary);font-size:0.85rem;">Read more on GitHub →</a>` : ""}
+  
+    if (issue) {
+      const issueData = await fetchGitHubIssueBody(issue.number);
+  
+      if (btnSlot && issueData && issueData.html_url) {
+        btnSlot.innerHTML = `
+          <a class="github-btn github-btn--accent" href="${issueData.html_url}" target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" style="width:16px;height:16px;fill:currentColor;">
+              <path d="M8 .2a8 8 0 00-2.53 15.6c.4.07.55-.17.55-.38 0-.18-.01-.78-.01-1.42-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.12-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.58.82-2.14-.08-.2-.36-1.01.08-2.1 0 0 .67-.21 2.2.82a7.6 7.6 0 012 0c1.53-1.03 2.2-.82 2.2-.82.44 1.09.16 1.9.08 2.1.51.56.82 1.27.82 2.14 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.22 0 .21.15.46.55.38A8 8 0 008 .2z"></path>
+            </svg>
+            GitHub
+          </a>
         `;
-      } else {
-        githubContainer.innerHTML = `<div style="color:var(--text-tertiary);font-size:0.85rem;">No project summary found.</div>`;
+      }
+  
+      if (issueData && issueData.body && githubContainer) {
+        const summary = extractProjectSummary(issueData.body);
+        if (summary) {
+          const maxChars = 800;
+          const plain = summary.replace(/[#*`>\[\]()]/g, "").trim();
+          const truncated = plain.length > maxChars ? plain.slice(0, maxChars) + "..." : plain;
+          githubContainer.innerHTML = `
+            <h3 style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.5rem;">Project Summary</h3>
+            <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.6;">${truncated}</p>
+            ${plain.length > maxChars ? `<a href="${issueData.html_url}" target="_blank" style="color:var(--accent-secondary);font-size:0.85rem;">Read more on GitHub →</a>` : ""}
+          `;
+        } else {
+          githubContainer.innerHTML = `<div style="color:var(--text-tertiary);font-size:0.85rem;">No project summary found.</div>`;
+        }
+      } else if (githubContainer) {
+        githubContainer.innerHTML = `<div style="color:var(--text-tertiary);font-size:0.85rem;">No GitHub details found.</div>`;
       }
     } else if (githubContainer) {
-      githubContainer.innerHTML = `<div style="color:var(--text-tertiary);font-size:0.85rem;">No GitHub details found.</div>`;
+      githubContainer.innerHTML = `<div style="color:var(--text-tertiary);font-size:0.85rem;">No GitHub issue found.</div>`;
     }
-  } else if (githubContainer) {
-    githubContainer.innerHTML = `<div style="color:var(--text-tertiary);font-size:0.85rem;">No GitHub issue found.</div>`;
   }
-}
 
 /* ===== Modal Functions ===== */
 function openModal(content) {
@@ -1837,10 +1871,40 @@ function openModal(content) {
 }
 
 function closeModal() {
-  const modalOverlay = document.getElementById("modalOverlay");
-  if (modalOverlay) modalOverlay.classList.remove("active");
-  document.body.style.overflow = "auto";
-}
+    const modalOverlay = document.getElementById("modalOverlay");
+    if (modalOverlay) modalOverlay.classList.remove("active");
+    document.body.style.overflow = "auto";
+    
+    // Remove grant param from URL, keep other filters
+    if (window.location.hash.includes('grant=')) {
+      const hash = window.location.hash;
+      const cleanHash = hash.replace(/[?&]grant=[^&]+/, '').replace('?&', '?').replace(/\?$/, '');
+      history.replaceState({ page: 'grants' }, '', cleanHash || '#grants');
+    }
+  }
+
+  function openGrantFromURL() {
+    const hash = window.location.hash;
+    if (!hash.includes('grant=')) return false;
+    
+    const params = new URLSearchParams(hash.split('?')[1]);
+    const grantId = params.get('grant');
+    if (!grantId) return false;
+    
+    const decoded = decodeGrantId(grantId);
+    if (!decoded) return false;
+    
+    // Find grant and open modal
+    const grant = allGrants.find(
+      (g) => g.project === decoded.project && g.grantee === decoded.grantee
+    );
+    
+    if (grant) {
+      showGrantDetails(grant.project, grant.grantee);
+      return true;
+    }
+    return false;
+  }
 
 /* ===== PAYMENTS ===== */
 function currentPaymentsRangeLabel() {
