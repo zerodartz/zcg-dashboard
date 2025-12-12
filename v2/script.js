@@ -613,7 +613,7 @@ async function computeGrantStats() {
       avgMonthlyPayoutZec12m
     };
   }
-  
+
 /* ===== DASHBOARD / OVERVIEW ===== */
 async function loadOverview() {
     try {
@@ -650,7 +650,7 @@ async function loadOverview() {
       const zecDev2 = cleanNumber(getValue("ZEC accrued from 2nd Dev Fund"));
       const zecDev3 = cleanNumber(getValue("ZEC accrued from 3rd Dev Fund"));
   
-      const totalUSD = usdBal + usdRes;
+      const totalUSD = usdBal;
       const zecValueUSD = zecBal * zecPrice;
       const totalTreasuryUSD = zecValueUSD + totalUSD;
   
@@ -659,8 +659,7 @@ async function loadOverview() {
       const monthlyInflowUSD = MONTHLY_ZEC_INFLOW * zecPrice;
   
       // Hedging calculation
-      const hedgedUSD = usdRes;
-      const overhedged = hedgedUSD > futureLiab ? hedgedUSD - futureLiab : 0;
+      const overhedged = usdRes;
   
       // Get grant stats
       const grantStats = await computeGrantStats();
