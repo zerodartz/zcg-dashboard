@@ -1325,7 +1325,8 @@ for (let i = 1; i < allAoA.length; i++) {
         forumLink: grant.forumLink || null
       };
     });
-
+    
+    applyFilters();  // This now handles the filtering correctly
     setupCategoryFilters();
   } catch (error) {
     console.error("Error in loadGrants:", error);
