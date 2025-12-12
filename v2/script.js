@@ -1410,8 +1410,11 @@ function filterGrantsBySearch(query) {
         return false;
       });
     } else {
+      // Exclude declined/discussion from regular status filters
       searchFiltered = searchFiltered.filter(
-        (g) => g.status === currentStatusFilter
+        (g) => g.status === currentStatusFilter &&
+               g.decisionStatus !== "rejected" &&
+               g.decisionStatus !== "discussion"
       );
     }
   }
@@ -1450,7 +1453,12 @@ function applyFilters() {
         return false;
       });
     } else {
-      filtered = filtered.filter((g) => g.status === currentStatusFilter);
+      // Exclude declined/discussion from regular status filters
+      filtered = filtered.filter(
+        (g) => g.status === currentStatusFilter &&
+               g.decisionStatus !== "rejected" &&
+               g.decisionStatus !== "discussion"
+      );
     }
   }
 
