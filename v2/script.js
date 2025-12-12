@@ -1251,6 +1251,33 @@ async function loadGrants() {
             forumLink: meta.forumLink || null
           };
       }
+      // Add declined/discussion proposals from ALL_GRANTS
+const allAoA = sheetToAoA(SHEETS.ALL_GRANTS);
+for (let i = 1; i < allAoA.length; i++) {
+  const row = allAoA[i] || [];
+  const project = (row[1] || "").toString().trim();  // column B
+  const grantee = (row[2] || "").toString().trim();  // column C
+  const decision = getDecisionStatus(row[5]);        // column F
+
+  if (!project || !grantee) continue;
+  if (decision !== "rejected" && decision !== "discussion") continue;
+
+  const key = `${project}_${grantee}`;
+  if (projectMap[key]) continue; // already exists
+
+  projectMap[key] = {
+    project,
+    grantee,
+    totalAmount: 0,
+    paidAmount: 0,
+    milestones: [],
+    lastPaidDate: null,
+    category: "",
+    submissionDate: toDate(row[0]),  // column A
+    decisionStatus: decision,
+    forumLink: null
+  };
+}
 
       const cat = (row[categoryHeader] || "").toString().replace(/\u00A0/g, " ").trim();
       if (cat && !projectMap[key].category) {
