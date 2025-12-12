@@ -1562,12 +1562,12 @@ function renderGrants(grants) {
               ? `<span class="category-pill">${esc(grant.category)}</span>`
               : "";
         
-            const statusPill = `
-              <span class="grant-status ${grant.status}">
-                ${grant.status.replace("-", " ").toUpperCase()} 
-                (${grant.completedMilestones}/${grant.totalMilestones})
-              </span>
-            `;
+              const statusPill = (grant.decisionStatus !== "rejected" && grant.decisionStatus !== "discussion")
+              ? `<span class="grant-status ${grant.status}">
+                  ${grant.status.replace("-", " ").toUpperCase()} 
+                  (${grant.completedMilestones}/${grant.totalMilestones})
+                </span>`
+              : "";
         
             return `
               <div class="grant-card ${grant.status}" onclick="showGrantDetails('${esc(
@@ -1741,9 +1741,14 @@ async function showGrantDetails(project, grantee) {
       <span><strong>Milestones:</strong> ${grant.completedMilestones}/${grant.totalMilestones}</span>
     </div>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
-      ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
-      <span class="grant-status ${grant.status}">${grant.status.replace("-", " ").toUpperCase()}</span>
-    </div>
+  ${grant.category ? `<span class="category-pill">${grant.category}</span>` : ""}
+  ${(grant.decisionStatus !== "rejected" && grant.decisionStatus !== "discussion")
+    ? `<span class="grant-status ${grant.status}">${grant.status.replace("-", " ").toUpperCase()}</span>`
+    : `<span class="grant-status ${grant.decisionStatus === "discussion" ? "discussion" : "declined"}">
+        ${grant.decisionStatus === "discussion" ? "DISCUSSION REQUIRED" : "DECLINED"}
+       </span>`
+  }
+</div>
     <div id="githubSection" style="margin-bottom:1.5rem;">
       <div style="color:var(--text-tertiary);font-size:0.85rem;">Loading GitHub details...</div>
     </div>
