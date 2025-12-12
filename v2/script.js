@@ -1200,6 +1200,61 @@ function getDecisionStatus(rawDecision) {
     return meta;
   }
 
+  /* ===== URL Filter Functions ===== */
+function updateURLWithFilters() {
+    if (window.location.hash.split('?')[0] !== '#grants') return;
+    
+    const params = new URLSearchParams();
+    if (currentStatusFilter !== 'all') params.set('status', currentStatusFilter);
+    if (currentBudgetFilter !== 'all') params.set('budget', currentBudgetFilter);
+    if (currentCategoryFilter !== 'all') params.set('category', currentCategoryFilter);
+    if (currentSortMode !== 0) params.set('sort', sortModes[currentSortMode].key);
+    
+    const paramString = params.toString();
+    const newHash = paramString ? `#grants?${paramString}` : '#grants';
+    history.replaceState({ page: 'grants' }, '', newHash);
+  }
+  
+  function readFiltersFromURL() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#grants')) return false;
+    
+    const queryPart = hash.split('?')[1];
+    if (!queryPart) return false;
+    
+    const params = new URLSearchParams(queryPart);
+    
+    if (params.has('status')) {
+      currentStatusFilter = params.get('status');
+      document.querySelectorAll('#statusFilters .filter-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === currentStatusFilter);
+      });
+    }
+    
+    if (params.has('budget')) {
+      currentBudgetFilter = params.get('budget');
+      document.querySelectorAll('#budgetFilters .filter-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.budget === currentBudgetFilter);
+      });
+    }
+    
+    if (params.has('category')) {
+      currentCategoryFilter = params.get('category');
+    }
+    
+    if (params.has('sort')) {
+      const sortKey = params.get('sort');
+      const idx = sortModes.findIndex(m => m.key === sortKey);
+      if (idx >= 0) {
+        currentSortMode = idx;
+        const sortBtn = document.getElementById("sortBtn");
+        if (sortBtn) sortBtn.innerHTML = `${sortModes[idx].icon} ${sortModes[idx].text}`;
+      }
+    }
+    
+    return true;
+  }
+
 async function loadGrants() {
   try {
     await loadWorkbook();
@@ -1362,6 +1417,7 @@ function cycleSortMode() {
   if (sortBtn) sortBtn.innerHTML = `${mode.icon} ${mode.text}`;
 
   sortGrants();
+  updateURLWithFilters();
 }
 
 function sortGrants() {
@@ -1457,6 +1513,7 @@ function filterGrantsBySearch(query) {
   
     filteredGrants = searchFiltered;
     sortGrants();
+    updateURLWithFilters();
   }
 
 function applyFilters() {
@@ -1508,6 +1565,7 @@ function applyFilters() {
   
     filteredGrants = filtered;
     sortGrants();
+    updateURLWithFilters();
   }
 
 /* ===== Category Filters ===== */
