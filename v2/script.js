@@ -2144,6 +2144,11 @@ async function loadStipends() {
       const monthly = {};
       let totalUSDYTD = 0;
       let totalZECYTD = 0;
+      const MEMBERS = 5;
+      const perMemberUsdYTD = totalUSDYTD / MEMBERS;
+const avgMonths =
+  months.length > 0 ? months.length : 1;
+const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
   
       rows.forEach((r) => {
         const date = toDate(r["Date"]);
@@ -2184,8 +2189,7 @@ async function loadStipends() {
       const usdAllMembers = months.map((m) => monthly[m].usd);
       const zecAllMembers = months.map((m) => monthly[m].zec);
   
-      // Optional 3rd line: fixed 10 ZEC per person, valued in USD
-      const MEMBERS = 1;
+      //3rd line: fixed 10 ZEC per person, valued in USD
       const FIXED_ZEC_PER_PERSON = 10;
       const fixed10ZecUsd = months.map((m) => {
         const entry = monthly[m];
@@ -2195,30 +2199,38 @@ async function loadStipends() {
               entry.zecUsdRateSamples.length
             : 0;
         return avgRate
-          ? FIXED_ZEC_PER_PERSON * MEMBERS * avgRate
+          ? FIXED_ZEC_PER_PERSON * avgRate
           : 0;
       });
   
       document.getElementById("stipendsContent").innerHTML = `
         <div class="stipends-cards">
           <div class="stipend-card">
-            <div class="stipend-label">Total USD Paid YTD</div>
+            <div class="stipend-label">Total in USD Paid YTD</div>
             <div class="stipend-value">${formatUSD(totalUSDYTD)}</div>
           </div>
           <div class="stipend-card">
-            <div class="stipend-label">Total ZEC Paid YTD</div>
+            <div class="stipend-label">Total in ZEC Paid YTD</div>
             <div class="stipend-value">${formatZEC(totalZECYTD)}</div>
           </div>
+          <div class="stipend-card">
+      <div class="stipend-label">Per Member YTD combined ZEC+USD</div>
+      <div class="stipend-value">${formatUSD(perMemberUsdYTD)}</div>
+    </div>
+    <div class="stipend-card">
+      <div class="stipend-label">Avg Per Member / Month (USD)</div>
+      <div class="stipend-value">${formatUSD(avgPerMemberPerMonth)}</div>
+    </div>
         </div>
         <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
-          Lines show total USD cash and total ZEC stipends paid to all members per
-          month. The dashed line (if present) shows the USD value of the fixed
-          10&nbsp;ZEC per committee member.
+          Lines show total USD cash and total ZEC stipends paid to 5 members combined per
+          month. The dashed line shows the USD value of the fixed
+          10&nbsp;ZEC per committee member per month the rest is fixed USD amount $1725.
         </p>
         <div class="stipends-chart-wrapper">
-          <div class="stipends-chart-title">Committee Stipends (All Members)</div>
+          <div class="stipends-chart-title">Committee Stipends (Total combined all 5 Members)</div>
           <div class="stipends-chart-subtitle">
-            USD cash, ZEC units, and optional USD value of 10 ZEC/member
+            USD cash, ZEC units, and USD value of 10 ZEC/member
           </div>
           <div class="chart-container">
             <canvas id="stipendsChart"></canvas>
