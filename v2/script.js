@@ -103,11 +103,10 @@ function showPage(pageName) {
       loadZecPriceTrend();
       loadApprovedChart();
     }
-    
-    // Don't update history if we have a grant param
-    if (!window.location.hash.includes('grant=')) {
-      history.pushState({ page: pageName }, "", `#${pageName}`);
-    }
+    // Don't update history if we have query params
+if (!window.location.hash.includes('?')) {
+    history.pushState({ page: pageName }, "", `#${pageName}`);
+  }
     
     const titles = {
       dashboard: "Dashboard",
