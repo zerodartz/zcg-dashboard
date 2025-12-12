@@ -532,6 +532,35 @@
     font-weight: 600;
     margin-bottom: 0.75rem;
   }
+
+  .meta-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0.75rem;
+  }
+  
+  .meta-pill {
+    display: inline-block;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  
+  .meta-pill-opened {
+    background: rgba(148, 163, 184, 0.12); /* slate-ish */
+    color: var(--text-secondary);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+  }
+  
+  .grant-paid-line {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.35rem;
+  }
   
   /* ===== Progress Bar ===== */
   .progress-bar {
@@ -1094,4 +1123,3 @@
       margin-bottom: 3rem;
     }
   }
-  
