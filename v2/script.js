@@ -1484,70 +1484,87 @@ function renderGrants(grants) {
       '<div class="loading-placeholder">No grants found</div>';
     return;
   }
-
-  container.innerHTML = grants
-    .map((grant) => {
-      const progressPercent =
-        grant.totalMilestones > 0
-          ? (grant.completedMilestones / grant.totalMilestones) * 100
-          : 0;
-
-      const decisionLabel =
-        grant.decisionStatus === "discussion"
-          ? "Discussion Required"
-          : grant.decisionStatus === "rejected"
-          ? "Declined"
-          : null;
-
-      const esc = (s) =>
-        String(s)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
-
-      return `
-        <div class="grant-card ${grant.status}" onclick="showGrantDetails('${esc(
-        grant.project
-      )}', '${esc(grant.grantee)}')">
-          <div class="grant-title">${esc(grant.project)}</div>
-          <div class="progress-bar">
-            <div class="progress-fill ${
-              grant.status
-            }" style="width: ${progressPercent}%;"></div>
-          </div>
-          <div class="grant-grantee">${esc(grant.grantee)}</div>
-          ${
-            grant.submissionDate
-              ? `<div class="grant-date">Opened: ${new Date(
-                  grant.submissionDate
-                ).toLocaleDateString()}</div>`
-              : ""
-          }
-          <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
-          ${
-            grant.category
-              ? `<div class="category-pill">${esc(grant.category)}</div>`
-              : ``
-          }
-          <div class="grant-status ${grant.status}">
-            ${grant.status.replace("-", " ").toUpperCase()} 
-            (${grant.completedMilestones}/${grant.totalMilestones})
-          </div>
-          ${
-            decisionLabel
-              ? `<div class="grant-status ${
-                  grant.decisionStatus === "discussion"
-                    ? "discussion"
-                    : "declined"
-                }">Decision: ${decisionLabel.toUpperCase()}</div>`
-              : ""
-          }
-          <div class="grant-plus-btn"><span>+</span></div>
-        </div>`;
-    })
-    .join("");
+          container.innerHTML = grants
+          .map((grant) => {
+            const progressPercent =
+              grant.totalMilestones > 0
+                ? (grant.completedMilestones / grant.totalMilestones) * 100
+                : 0;
+        
+            const pctPaid =
+              grant.totalAmount > 0
+                ? Math.round((grant.paidAmount / grant.totalAmount) * 100)
+                : 0;
+        
+            const decisionLabel =
+              grant.decisionStatus === "discussion"
+                ? "Discussion Required"
+                : grant.decisionStatus === "rejected"
+                ? "Declined"
+                : null;
+        
+            const esc = (s) =>
+              String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        
+            const openedPill = grant.submissionDate
+              ? `<span class="meta-pill meta-pill-opened">
+                   Opened: ${new Date(grant.submissionDate).toLocaleDateString()}
+                 </span>`
+              : "";
+        
+            const categoryPill = grant.category
+              ? `<span class="category-pill">${esc(grant.category)}</span>`
+              : "";
+        
+            const statusPill = `
+              <span class="grant-status ${grant.status}">
+                ${grant.status.replace("-", " ").toUpperCase()} 
+                (${grant.completedMilestones}/${grant.totalMilestones})
+              </span>
+            `;
+        
+            return `
+              <div class="grant-card ${grant.status}" onclick="showGrantDetails('${esc(
+                grant.project
+              )}', '${esc(grant.grantee)}')">
+                <div class="grant-title">${esc(grant.project)}</div>
+                <div class="grant-grantee">${esc(grant.grantee)}</div>
+        
+                <div class="meta-pill-row">
+                  ${openedPill}
+                  ${categoryPill}
+                  ${statusPill}
+                </div>
+        
+                <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
+        
+                <div class="progress-bar">
+                  <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
+                </div>
+        
+                <div class="grant-paid-line">
+                  ${formatUSD(grant.paidAmount)} paid (${pctPaid}%)
+                </div>
+        
+                ${
+                  decisionLabel
+                    ? `<div class="grant-status ${
+                        grant.decisionStatus === "discussion"
+                          ? "discussion"
+                          : "declined"
+                      }">Decision: ${decisionLabel.toUpperCase()}</div>`
+                    : ""
+                }
+        
+                <div class="grant-plus-btn"><span>+</span></div>
+              </div>`;
+          })
+          .join("");
 }
 
 function updateGrantsCounter(filtered, total) {
