@@ -2185,7 +2185,7 @@ async function loadStipends() {
       const zecAllMembers = months.map((m) => monthly[m].zec);
   
       // Optional 3rd line: fixed 10 ZEC per person, valued in USD
-      const MEMBERS = 5;
+      const MEMBERS = 1;
       const FIXED_ZEC_PER_PERSON = 10;
       const fixed10ZecUsd = months.map((m) => {
         const entry = monthly[m];
