@@ -1326,8 +1326,6 @@ for (let i = 1; i < allAoA.length; i++) {
       };
     });
 
-    filteredGrants = [...allGrants];
-    sortGrants();
     setupCategoryFilters();
   } catch (error) {
     console.error("Error in loadGrants:", error);
