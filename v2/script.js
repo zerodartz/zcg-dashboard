@@ -1130,13 +1130,11 @@ function getDecisionStatus(rawDecision) {
     if (!s) return "unknown";
   
     if (s.includes("approved")) return "approved";
-  
-    // Column F contains "Rejected", "Filtered by FPF", "Discussion Required", etc.
     if (s.includes("reject") || s.includes("decline")) return "rejected";
     if (s.includes("withdraw")) return "withdrawn";
     if (s.includes("filter")) return "filtered";
-  
     if (s.includes("discussion")) return "discussion";
+    if (s.includes("cancel")) return "cancelled";
   
     return "unknown";
   }
@@ -1252,18 +1250,19 @@ async function loadGrants() {
           };
       }
       // Add declined/discussion proposals from ALL_GRANTS
+// Add declined/discussion proposals from ALL_GRANTS
 const allAoA = sheetToAoA(SHEETS.ALL_GRANTS);
 for (let i = 1; i < allAoA.length; i++) {
   const row = allAoA[i] || [];
-  const project = (row[1] || "").toString().trim();  // column B
-  const grantee = (row[2] || "").toString().trim();  // column C
-  const decision = getDecisionStatus(row[5]);        // column F
+  const project = (row[1] || "").toString().trim();
+  const grantee = (row[2] || "").toString().trim();
+  const decision = getDecisionStatus(row[5]);
 
   if (!project || !grantee) continue;
   if (decision !== "rejected" && decision !== "discussion") continue;
 
   const key = `${project}_${grantee}`;
-  if (projectMap[key]) continue; // already exists
+  if (projectMap[key]) continue;
 
   projectMap[key] = {
     project,
@@ -1273,7 +1272,7 @@ for (let i = 1; i < allAoA.length; i++) {
     milestones: [],
     lastPaidDate: null,
     category: "",
-    submissionDate: toDate(row[0]),  // column A
+    submissionDate: toDate(row[0]),
     decisionStatus: decision,
     forumLink: null
   };
@@ -1303,7 +1302,9 @@ for (let i = 1; i < allAoA.length; i++) {
       });
     });
 
-    allGrants = Object.values(projectMap).map((grant) => {
+    allGrants = Object.values(projectMap)
+    .filter((grant) => grant.decisionStatus !== "cancelled")
+    .map((grant) => {
         const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
         const totalMilestones = grant.milestones.length;
         let status;
@@ -1331,6 +1332,7 @@ for (let i = 1; i < allAoA.length; i++) {
       '<div class="loading-placeholder">Error loading grants data</div>';
   }
 }
+
 
 /* ===== Grant Sorting ===== */
 function cycleSortMode() {
