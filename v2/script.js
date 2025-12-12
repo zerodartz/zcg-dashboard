@@ -1387,21 +1387,25 @@ function sortGrants() {
 
 /* ===== Grant Filters ===== */
 function filterGrantsBySearch(query) {
-  if (!allGrants.length) return;
-
-  query = (query || "").toLowerCase();
-
-  let searchFiltered = allGrants.filter((grant) => {
-    const cat = (grant.category || "").toLowerCase();
-    return (
-      grant.project.toLowerCase().includes(query) ||
-      grant.grantee.toLowerCase().includes(query) ||
-      cat.includes(query)
-    );
-  });
-
-  if (currentStatusFilter !== "all") {
-    if (
+    if (!allGrants.length) return;
+  
+    query = (query || "").toLowerCase();
+  
+    let searchFiltered = allGrants.filter((grant) => {
+      const cat = (grant.category || "").toLowerCase();
+      return (
+        grant.project.toLowerCase().includes(query) ||
+        grant.grantee.toLowerCase().includes(query) ||
+        cat.includes(query)
+      );
+    });
+  
+    if (currentStatusFilter === "all") {
+      // "All" means all approved grants, not declined/discussion
+      searchFiltered = searchFiltered.filter(
+        (g) => g.decisionStatus !== "rejected" && g.decisionStatus !== "discussion"
+      );
+    } else if (
       currentStatusFilter === "discussion" ||
       currentStatusFilter === "declined"
     ) {
@@ -1422,29 +1426,32 @@ function filterGrantsBySearch(query) {
                g.decisionStatus !== "discussion"
       );
     }
+  
+    switch (currentBudgetFilter) {
+      case "small":
+        searchFiltered = searchFiltered.filter((g) => g.totalAmount < 50000);
+        break;
+      case "medium":
+        searchFiltered = searchFiltered.filter((g) => g.totalAmount >= 50000 && g.totalAmount <= 200000);
+        break;
+      case "large":
+        searchFiltered = searchFiltered.filter((g) => g.totalAmount > 200000);
+        break;
+    }
+  
+    filteredGrants = searchFiltered;
+    sortGrants();
   }
-
-  switch (currentBudgetFilter) {
-    case "small":
-      searchFiltered = searchFiltered.filter((g) => g.totalAmount < 50000);
-      break;
-    case "medium":
-      searchFiltered = searchFiltered.filter((g) => g.totalAmount >= 50000 && g.totalAmount <= 200000);
-      break;
-    case "large":
-      searchFiltered = searchFiltered.filter((g) => g.totalAmount > 200000);
-      break;
-  }
-
-  filteredGrants = searchFiltered;
-  sortGrants();
-}
 
 function applyFilters() {
-  let filtered = [...allGrants];
-
-  if (currentStatusFilter !== "all") {
-    if (
+    let filtered = [...allGrants];
+  
+    if (currentStatusFilter === "all") {
+      // "All" means all approved grants, not declined/discussion
+      filtered = filtered.filter(
+        (g) => g.decisionStatus !== "rejected" && g.decisionStatus !== "discussion"
+      );
+    } else if (
       currentStatusFilter === "discussion" ||
       currentStatusFilter === "declined"
     ) {
@@ -1465,28 +1472,27 @@ function applyFilters() {
                g.decisionStatus !== "discussion"
       );
     }
+  
+    switch (currentBudgetFilter) {
+      case "small":
+        filtered = filtered.filter((g) => g.totalAmount < 50000);
+        break;
+      case "medium":
+        filtered = filtered.filter((g) => g.totalAmount >= 50000 && g.totalAmount <= 200000);
+        break;
+      case "large":
+        filtered = filtered.filter((g) => g.totalAmount > 200000);
+        break;
+    }
+  
+    if (currentCategoryFilter !== "all") {
+      const catNorm = currentCategoryFilter.toLowerCase();
+      filtered = filtered.filter((g) => (g.category || "").toLowerCase() === catNorm);
+    }
+  
+    filteredGrants = filtered;
+    sortGrants();
   }
-
-  switch (currentBudgetFilter) {
-    case "small":
-      filtered = filtered.filter((g) => g.totalAmount < 50000);
-      break;
-    case "medium":
-      filtered = filtered.filter((g) => g.totalAmount >= 50000 && g.totalAmount <= 200000);
-      break;
-    case "large":
-      filtered = filtered.filter((g) => g.totalAmount > 200000);
-      break;
-  }
-
-  if (currentCategoryFilter !== "all") {
-    const catNorm = currentCategoryFilter.toLowerCase();
-    filtered = filtered.filter((g) => (g.category || "").toLowerCase() === catNorm);
-  }
-
-  filteredGrants = filtered;
-  sortGrants();
-}
 
 /* ===== Category Filters ===== */
 function setupCategoryFilters() {
