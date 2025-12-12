@@ -543,23 +543,23 @@
   .meta-pill {
     display: inline-block;
     padding: 0.25rem 0.6rem;
-    border-radius: 999px;
+    background: rgba(178, 178, 178, 0.1);
+    color: var(--text-secondary);
+    border-radius: 6px;
     font-size: 0.65rem;
     font-weight: 600;
-    line-height: 1;
-    white-space: nowrap;
+    margin-bottom: 0.75rem;
   }
   
   .meta-pill-opened {
-    background: rgba(148, 163, 184, 0.12); /* slate-ish */
+    background: rgba(178, 178, 178, 0.1);
     color: var(--text-secondary);
-    border: 1px solid rgba(148, 163, 184, 0.35);
   }
   
   .grant-paid-line {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: var(--text-secondary);
-    margin-top: 0.35rem;
+    margin-top: 0.4rem;
   }
   
   /* ===== Progress Bar ===== */
@@ -597,6 +597,7 @@
     padding: 0.25rem 0.6rem;
     border-radius: 6px;
     display: inline-block;
+    margin-bottom: 0.75rem;
   }
   
   .grant-status.completed {
