@@ -1,15 +1,16 @@
 /* ===== CSS Variables ===== */
 :root {
-    --bg: #f8f9fa;
-    --card-bg: #ffffff;
+    --bg: #f6f6f0;
+    --card-bg: #fffff5;
     --text: #1a1a1a;
     --text-secondary: #6b7280;
     --text-tertiary: #9ca3af;
     --border: #e5e7eb;
     --zcash-yellow: #F4B728;
+    --nav-active: rgba(240, 180, 70, 0.4);
     --accent-primary: #F4B728;
     --accent-secondary: #ffd66b;
-    --accent-third: #ffc17c;  /* ADD THIS LINE */
+    --accent-third: #ffc17c;
     --success: #10b981;
     --warning: #f59e0b;
     --danger: #ef4444;
@@ -27,7 +28,7 @@
     --text-secondary: #a1a1aa;
     --text-tertiary: #71717a;
     --border: #2a2a2a;
-    --accent-third: #ffc17c;  /* ADD THIS LINE */
+    --accent-third: #ffc17c;
     --shadow: rgba(0, 0, 0, 0.3);
     --shadow-md: rgba(0, 0, 0, 0.4);
     --shadow-lg: rgba(0, 0, 0, 0.5);
@@ -123,8 +124,13 @@
   }
   
   .nav-link.active {
-    color: var(--zcash-yellow);
-    background: rgba(244, 183, 40, 0.1);
+    color: var(--text);
+    background: var(--nav-active);
+  }
+  
+  .nav-link.active:hover {
+    color: var(--text);
+    background: var(--accent-secondary);
   }
   
   .header-right {
