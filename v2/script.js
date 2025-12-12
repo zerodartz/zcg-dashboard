@@ -1303,25 +1303,28 @@ for (let i = 1; i < allAoA.length; i++) {
     });
 
     allGrants = Object.values(projectMap)
-    .filter((grant) => grant.decisionStatus !== "cancelled")
+    .filter((grant) => 
+      grant.decisionStatus !== "cancelled" && 
+      grant.decisionStatus !== "withdrawn"
+    )
     .map((grant) => {
-        const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
-        const totalMilestones = grant.milestones.length;
-        let status;
-        if (completedMilestones === totalMilestones) status = "completed";
-        else if (completedMilestones > 0) status = "in-progress";
-        else status = "waiting";
-        return {
-            ...grant,
-            status,
-            completedMilestones,
-            totalMilestones,
-            category: grant.category || "",
-            submissionDate: grant.submissionDate || null,
-            decisionStatus: grant.decisionStatus || "unknown",
-            forumLink: grant.forumLink || null
-          };
-      });
+      const completedMilestones = grant.milestones.filter((m) => m.paidDate).length;
+      const totalMilestones = grant.milestones.length;
+      let status;
+      if (completedMilestones === totalMilestones && totalMilestones > 0) status = "completed";
+      else if (completedMilestones > 0) status = "in-progress";
+      else status = "waiting";
+      return {
+        ...grant,
+        status,
+        completedMilestones,
+        totalMilestones,
+        category: grant.category || "",
+        submissionDate: grant.submissionDate || null,
+        decisionStatus: grant.decisionStatus || "unknown",
+        forumLink: grant.forumLink || null
+      };
+    });
 
     filteredGrants = [...allGrants];
     sortGrants();
