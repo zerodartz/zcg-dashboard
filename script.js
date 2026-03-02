@@ -972,15 +972,15 @@ async function loadCategoryChart() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        cutout: "35%", // Hole in the middle
+        cutout: "28%", // Hole in the middle
         plugins: {
           legend: {
             display: true,
-            position: "right",
+            position: "bottom",
             labels: {
               color: getComputedStyle(document.documentElement).getPropertyValue("--text-secondary").trim(),
-              font: { size: 11 },
-              padding: 12,
+              font: { size: 10 },
+              padding: 10,
               usePointStyle: true,
               pointStyle: "circle"
             }
