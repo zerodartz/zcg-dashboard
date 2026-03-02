@@ -2309,8 +2309,8 @@ async function loadLiquidity() {
     let usdValueWallet = 0;
     let gainLossKPI = 0;
 
-    // Look for KPI data starting from row 2 (index 2)
-    for (let r = 2; r < aoa.length; r++) {
+    // Look for KPI data starting from row 1 (index 1) - your data starts at row 2
+    for (let r = 1; r < aoa.length; r++) {
       const label = aoa[r]?.[COL_KPI_LABEL];
       const value = aoa[r]?.[COL_KPI_VALUE];
 
@@ -2327,14 +2327,12 @@ async function loadLiquidity() {
 
     // Calculate total liquidity added from project data
     let totalLiquidityAdded = 0;
-    for (let r = 1; r < aoa.length; r++) {  // Start from row 1 (index 1) since row 0 is header
+    for (let r = 1; r < aoa.length; r++) {  // Start from row 1 (index 1)
       const proj = aoa[r]?.[COL_PROJECT];
       if (!proj) continue;
       const amt = cleanNumber(aoa[r]?.[COL_AMOUNT_USD]);
       if (amt > 0) totalLiquidityAdded += amt;
     }
-    
-    const profitLoss = usdValueWallet - totalLiquidityAdded;
 
     const html = `
       <div class="liquidity-cards">
@@ -2351,7 +2349,7 @@ async function loadLiquidity() {
           <div class="liquidity-content">
             <div class="liquidity-icon liquidity-icon-bg">💵</div>
             <div>
-              <div class="liquidity-label">Current Liquidity Value</div>
+              <div class="liquidity-label">Current USD Value</div>
               <div class="liquidity-value">${formatUSD(usdValueWallet)}</div>
             </div>
           </div>
@@ -2360,7 +2358,7 @@ async function loadLiquidity() {
           <div class="liquidity-content">
             <div class="liquidity-icon liquidity-icon-bg">⚡</div>
             <div>
-              <div class="liquidity-label">ZEC Liquidity</div>
+              <div class="liquidity-label">ZEC Balance</div>
               <div class="liquidity-value">${formatZEC(zecBalance)}</div>
             </div>
           </div>
@@ -2369,7 +2367,7 @@ async function loadLiquidity() {
           <div class="liquidity-content">
             <div class="liquidity-icon liquidity-icon-bg">☕</div>
             <div>
-              <div class="liquidity-label">CACAO Liquidity</div>
+              <div class="liquidity-label">CACAO Balance</div>
               <div class="liquidity-value">${cacaoBalance.toLocaleString()}</div>
             </div>
           </div>
