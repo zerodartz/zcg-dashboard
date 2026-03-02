@@ -868,21 +868,26 @@ async function loadCategoryChart() {
   try {
     await loadWorkbook();
     const aoa = sheetToAoA(SHEETS.FUNDS);
-    if (!aoa.length) return;
+    if (!aoa.length) {
+      document.getElementById("categoryChart").parentNode.innerHTML = '<div class="loading-placeholder">No data in Funds Distribution sheet</div>';
+      return;
+    }
 
-    const COL_LABEL = 12;
-    const COL_VALUE = 13;
+    // Use columns O and P (index 14 and 15) for Classification and USD paid out to date
+    const COL_CLASSIFICATION = 14; // Column O
+    const COL_USD_PAID = 15; // Column P
 
     const categoryTotals = {};
 
-    for (let r = 0; r < aoa.length; r++) {
+    // Process data - start from row 2 (skip header row)
+    for (let r = 2; r < aoa.length; r++) {
       const row = aoa[r] || [];
-      const labelCell = row[COL_LABEL];
-      const valueCell = row[COL_VALUE];
+      const labelCell = row[COL_CLASSIFICATION];
+      const valueCell = row[COL_USD_PAID];
 
       if (typeof labelCell === "string" && labelCell.trim()) {
         const label = labelCell.trim();
-        if (label.length > 0 && label.length <= 60) {
+        if (label.length > 0 && label !== "TOTAL") { // Skip TOTAL row
           const amount = cleanNumber(valueCell);
           if (amount > 0) {
             categoryTotals[label] = (categoryTotals[label] || 0) + amount;
@@ -891,8 +896,13 @@ async function loadCategoryChart() {
       }
     }
 
+    console.log("Category data found:", categoryTotals);
+
     const entries = Object.entries(categoryTotals).filter(([, v]) => v > 0);
-    if (!entries.length) return;
+    if (!entries.length) {
+      document.getElementById("categoryChart").parentNode.innerHTML = '<div class="loading-placeholder">No category data found</div>';
+      return;
+    }
 
     const sorted = entries.sort((a, b) => b[1] - a[1]);
     const labels = sorted.map(([cat]) => cat);
@@ -927,41 +937,7 @@ async function loadCategoryChart() {
     });
   } catch (error) {
     console.error("Error loading category chart:", error);
-  }
-}
-
-/* ===== ZEC Price Trend ===== */
-async function loadZecPriceTrend() {
-  try {
-    const res = await fetch("https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=90");
-    const data = await res.json();
-
-    const filtered = data.prices.filter((_, i) => i % 24 === 0);
-    const prices = filtered.map((p) => ({ date: new Date(p[0]), price: p[1] }));
-
-    const ctx = document.getElementById("zecPriceChart");
-    if (!ctx) return;
-    if (ctx.chart) ctx.chart.destroy();
-
-    ctx.chart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: prices.map((p) => p.date.toLocaleDateString()),
-        datasets: [{
-          label: "ZEC/USD",
-          data: prices.map((p) => p.price),
-          borderColor: getComputedStyle(document.documentElement).getPropertyValue("--accent-primary").trim(),
-          backgroundColor: "rgba(255,193,124,0.2)",
-          fill: true,
-          tension: 0.4,
-          pointRadius: 2,
-          pointHoverRadius: 5
-        }]
-      },
-      options: getChartOptions()
-    });
-  } catch (error) {
-    console.error("Error loading ZEC price:", error);
+    document.getElementById("categoryChart").parentNode.innerHTML = '<div class="loading-placeholder">Error loading category data</div>';
   }
 }
 
