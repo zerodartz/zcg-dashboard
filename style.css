@@ -233,7 +233,7 @@ header {
 /* ===== Stats Grid ===== */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 0.75rem;
   margin-bottom: 1.5rem;
 }
@@ -273,7 +273,7 @@ header {
 .stat-label,
 .metric-label {
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
   margin-bottom: 0.5rem;
   text-transform: uppercase;
@@ -289,9 +289,9 @@ header {
 }
 
 .stat-change {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
-  margin-top: 0.5rem;
+  margin-top: 0.7rem;
 }
 
 /* ===== Chart Cards ===== */
