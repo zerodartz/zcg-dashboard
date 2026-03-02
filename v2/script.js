@@ -2183,8 +2183,8 @@ async function loadPayouts() {
 
     const aoaFunds = sheetToAoA(SHEETS.FUNDS);
     if (aoaFunds.length >= 3) {
-      const headersF = (aoaFunds[2] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
-      const dataRowsF = aoaFunds.slice(3).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
+      const headersF = (aoaFunds[3] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
+      const dataRowsF = aoaFunds.slice(4).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
       const objF = dataRowsF.map((r) => {
         const o = {};
         headersF.forEach((h, i) => { if (h) o[h] = r[i]; });
