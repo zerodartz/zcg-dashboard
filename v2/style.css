@@ -273,8 +273,8 @@ header {
 .stat-label,
 .metric-label {
   color: var(--text-secondary);
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 500;
   margin-bottom: 0.5rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -289,7 +289,7 @@ header {
 }
 
 .stat-change {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
   margin-top: 0.5rem;
 }
