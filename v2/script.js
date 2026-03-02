@@ -458,319 +458,326 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /* ===== Compute Grant Stats ===== */
 /* ===== Compute Grant Stats ===== */
+/* ===== Compute Grant Stats ===== */
 async function computeGrantStats() {
-    await loadWorkbook();
-    const year = getCurrentYear();
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const twelveMonthsAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-  
-    const grantRows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
-  
-    const getKey = (r) => {
-      const project = (r["Project"] || "").toString().trim();
-      const grantee = (r["Grantee"] || r["Applicant(s)"] || r["Applicant"] || r["Recipient"] || "").toString().trim();
-      return project && grantee ? `${project}__${grantee}` : "";
-    };
-  
-    const getApprovedDate = (r) =>
-      toDate(r["Date Committee Approved/ Rejected"] || r["Date Committee Approved/Rejected"] || r["Approved Date"] || r["Date"]);
-  
-    const getPaidDate = (r) => toDate(r["Paid Out"]);
-    const getAmountUSD = (r) => cleanNumber(r["Amount (USD)"]);
-    const getZecDisbursed = (r) => cleanNumber(r["ZEC Disbursed"] || r["ZEC"] || 0);
-  
-    const projectMap = new Map();
-  
-    // Tracking for new metrics
-    let payout30dUSD = 0;
-    let payout30dZEC = 0;
-    let payout12mUSD = 0;
-    let payout12mZEC = 0;
-    let approvedBudget30d = 0;
-  
-    grantRows.forEach((r) => {
-      const key = getKey(r);
-      if (!key) return;
-  
-      if (!projectMap.has(key)) {
-        projectMap.set(key, {
-          project: (r["Project"] || "").toString().trim(),
-          grantee: (r["Grantee"] || r["Applicant(s)"] || r["Applicant"] || r["Recipient"] || "").toString().trim(),
-          milestones: [],
-          approvedDates: [],
-          totalBudget: 0
-        });
-      }
-      const rec = projectMap.get(key);
-  
-      const paidDate = getPaidDate(r);
-      const amtUsd = getAmountUSD(r);
-      const zec = getZecDisbursed(r);
-      const approvedDate = getApprovedDate(r);
-  
-      rec.milestones.push({ paidDate, amtUsd, zec });
-      rec.totalBudget += amtUsd;
-  
-      if (approvedDate) {
-        rec.approvedDates.push(approvedDate);
-        // Check if approved in last 30 days (first milestone only to avoid double counting)
-        if (approvedDate >= thirtyDaysAgo && rec.approvedDates.length === 1) {
-          approvedBudget30d += rec.totalBudget;
-        }
-      }
-  
-      // Payouts in last 30 days
-      if (paidDate && paidDate >= thirtyDaysAgo) {
-        payout30dUSD += amtUsd;
-        payout30dZEC += zec;
-      }
-  
-      // Payouts in last 12 months
-      if (paidDate && paidDate >= twelveMonthsAgo) {
-        payout12mUSD += amtUsd;
-        payout12mZEC += zec;
-      }
-    });
-  
-    const totalProjects = projectMap.size;
-  
-    let totalCompleted = 0;
-    let inProgress = 0;
-    let waiting = 0;
-    let approvedYTD = 0;
-    let completedYTD = 0;
-    let payoutsYTDUSD = 0;
-    let payoutsYTDZEC = 0;
-  
-    projectMap.forEach((rec) => {
-      const hasMilestones = rec.milestones.length > 0;
-      const allPaid = hasMilestones && rec.milestones.every((m) => !!m.paidDate);
-      const anyPaid = rec.milestones.some((m) => !!m.paidDate);
-  
-      if (allPaid) totalCompleted++;
-      else if (anyPaid) inProgress++;
-      else waiting++;
-  
-      const earliestApproved = rec.approvedDates.length
-        ? new Date(Math.min(...rec.approvedDates.map((d) => d.getTime())))
-        : null;
-  
-      let earliestActivity = earliestApproved;
-      if (!earliestActivity) {
-        const paidDates = rec.milestones.map((m) => m.paidDate).filter(Boolean);
-        if (paidDates.length) {
-          earliestActivity = new Date(Math.min(...paidDates.map((d) => d.getTime())));
-        }
-      }
-  
-      if (earliestActivity && earliestActivity.getFullYear() === year) {
-        approvedYTD++;
-      }
-  
-      // Completed YTD: all milestones paid and last payment was this year
-      if (allPaid) {
-        const paidDates = rec.milestones.map((m) => m.paidDate).filter(Boolean);
-        if (paidDates.length) {
-          const lastPaid = new Date(Math.max(...paidDates.map((d) => d.getTime())));
-          if (lastPaid.getFullYear() === year) {
-            completedYTD++;
-          }
-        }
-      }
-  
-      rec.milestones.forEach((m) => {
-        if (m.paidDate && m.paidDate.getFullYear() === year) {
-          payoutsYTDUSD += m.amtUsd;
-          payoutsYTDZEC += m.zec;
-        }
+  await loadWorkbook();
+  const year = getCurrentYear();
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const twelveMonthsAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+  const grantRows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
+
+  const getKey = (r) => {
+    const project = (r["Project"] || "").toString().trim();
+    const grantee = (r["Grantee"] || r["Applicant(s)"] || r["Applicant"] || r["Recipient"] || "").toString().trim();
+    return project && grantee ? `${project}__${grantee}` : "";
+  };
+
+  const getApprovedDate = (r) =>
+    toDate(r["Date Committee Approved/ Rejected"] || r["Date Committee Approved/Rejected"] || r["Approved Date"] || r["Date"]);
+
+  const getPaidDate = (r) => toDate(r["Paid Out"]);
+  const getAmountUSD = (r) => cleanNumber(r["Amount (USD)"]);
+  const getZecDisbursed = (r) => cleanNumber(r["ZEC Disbursed"] || r["ZEC"] || 0);
+
+  const projectMap = new Map();
+
+  // Tracking for new metrics
+  let payout30dUSD = 0;
+  let payout30dZEC = 0;
+  let payout12mUSD = 0;
+  let payout12mZEC = 0;
+
+  grantRows.forEach((r) => {
+    const key = getKey(r);
+    if (!key) return;
+
+    if (!projectMap.has(key)) {
+      projectMap.set(key, {
+        project: (r["Project"] || "").toString().trim(),
+        grantee: (r["Grantee"] || r["Applicant(s)"] || r["Applicant"] || r["Recipient"] || "").toString().trim(),
+        milestones: [],
+        approvedDates: [],
+        totalBudget: 0
       });
+    }
+    const rec = projectMap.get(key);
+
+    const paidDate = getPaidDate(r);
+    const amtUsd = getAmountUSD(r);
+    const zec = getZecDisbursed(r);
+    const approvedDate = getApprovedDate(r);
+
+    rec.milestones.push({ paidDate, amtUsd, zec });
+    rec.totalBudget += amtUsd;
+
+    if (approvedDate) {
+      rec.approvedDates.push(approvedDate);
+    }
+
+    // Payouts in last 30 days
+    if (paidDate && paidDate >= thirtyDaysAgo) {
+      payout30dUSD += amtUsd;
+      payout30dZEC += zec;
+    }
+
+    // Payouts in last 12 months
+    if (paidDate && paidDate >= twelveMonthsAgo) {
+      payout12mUSD += amtUsd;
+      payout12mZEC += zec;
+    }
+  });
+
+  const totalProjects = projectMap.size;
+
+  let totalCompleted = 0;
+  let inProgress = 0;
+  let waiting = 0;
+  let approvedYTD = 0;
+  let completedYTD = 0;
+  let payoutsYTDUSD = 0;
+  let payoutsYTDZEC = 0;
+  
+  // New metrics
+  let totalApprovedBudget = 0;
+  let approvedBudgetYTD = 0;
+
+  projectMap.forEach((rec) => {
+    const hasMilestones = rec.milestones.length > 0;
+    const allPaid = hasMilestones && rec.milestones.every((m) => !!m.paidDate);
+    const anyPaid = rec.milestones.some((m) => !!m.paidDate);
+
+    if (allPaid) totalCompleted++;
+    else if (anyPaid) inProgress++;
+    else waiting++;
+
+    const earliestApproved = rec.approvedDates.length
+      ? new Date(Math.min(...rec.approvedDates.map((d) => d.getTime())))
+      : null;
+
+    let earliestActivity = earliestApproved;
+    if (!earliestActivity) {
+      const paidDates = rec.milestones.map((m) => m.paidDate).filter(Boolean);
+      if (paidDates.length) {
+        earliestActivity = new Date(Math.min(...paidDates.map((d) => d.getTime())));
+      }
+    }
+
+    // Total Approved Budget (All Time)
+    totalApprovedBudget += rec.totalBudget;
+
+    if (earliestActivity && earliestActivity.getFullYear() === year) {
+      approvedYTD++;
+      // Total budget for grants approved/started this year
+      approvedBudgetYTD += rec.totalBudget;
+    }
+
+    // Completed YTD
+    if (allPaid) {
+      const paidDates = rec.milestones.map((m) => m.paidDate).filter(Boolean);
+      if (paidDates.length) {
+        const lastPaid = new Date(Math.max(...paidDates.map((d) => d.getTime())));
+        if (lastPaid.getFullYear() === year) {
+          completedYTD++;
+        }
+      }
+    }
+
+    rec.milestones.forEach((m) => {
+      if (m.paidDate && m.paidDate.getFullYear() === year) {
+        payoutsYTDUSD += m.amtUsd;
+        payoutsYTDZEC += m.zec;
+      }
     });
-  
-    // Calculate averages
-    const avgPayout30d = payout30dUSD; // Total for 30 days, not averaged further
-    const avgPayoutZec30d = payout30dZEC;
-    const avgMonthlyPayout12m = payout12mUSD / 12;
-    const avgMonthlyPayoutZec12m = payout12mZEC / 12;
-  
-    return {
-      year,
-      totalProjects,
-      totalCompleted,
-      inProgress,
-      waiting,
-      approvedYTD,
-      completedYTD,
-      payoutsYTDUSD,
-      payoutsYTDZEC,
-      avgPayout30d,
-      avgPayoutZec30d,
-      approvedBudget30d,
-      avgMonthlyPayout12m,
-      avgMonthlyPayoutZec12m
-    };
-  }
+  });
+
+  const avgPayout30d = payout30dUSD;
+  const avgPayoutZec30d = payout30dZEC;
+  const avgMonthlyPayout12m = payout12mUSD / 12;
+  const avgMonthlyPayoutZec12m = payout12mZEC / 12;
+
+  return {
+    year,
+    totalProjects,
+    totalCompleted,
+    inProgress,
+    waiting,
+    approvedYTD,
+    completedYTD,
+    payoutsYTDUSD,
+    payoutsYTDZEC,
+    avgPayout30d,
+    avgPayoutZec30d,
+    avgMonthlyPayout12m,
+    avgMonthlyPayoutZec12m,
+    totalApprovedBudget,
+    approvedBudgetYTD
+  };
+}
 
 /* ===== DASHBOARD / OVERVIEW ===== */
 async function loadOverview() {
-    try {
-      await loadWorkbook();
-      const rows = sheetToAoA(SHEETS.DASHBOARD_ZCG);
-  
-      const norm = (s) =>
-        (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
-  
-      const getValue = (label) => {
-        const r = rows.find((row) => norm(row[0]).includes(norm(label)));
-        return r ? r[1] : null;
-      };
-  
-      const blockTimeUTC = getValue("Block time (UTC)");
-      if (blockTimeUTC) {
-        clearTimeout(updateTimeTimeout);
-        const dt = toDate(blockTimeUTC) || new Date(blockTimeUTC + " UTC");
-        if (dt) {
-          lastUpdateTime = dt;
-          updateLastUpdateTime();
-        }
+  try {
+    await loadWorkbook();
+    const rows = sheetToAoA(SHEETS.DASHBOARD_ZCG);
+
+    const norm = (s) =>
+      (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
+
+    const getValue = (label) => {
+      const r = rows.find((row) => norm(row[0]).includes(norm(label)));
+      return r ? r[1] : null;
+    };
+
+    const blockTimeUTC = getValue("Block time (UTC)");
+    if (blockTimeUTC) {
+      clearTimeout(updateTimeTimeout);
+      const dt = toDate(blockTimeUTC) || new Date(blockTimeUTC + " UTC");
+      if (dt) {
+        lastUpdateTime = dt;
+        updateLastUpdateTime();
       }
-  
-      // Get values from sheet
-      const zecPrice = cleanNumber(getValue("ZECUSD price"));
-      const zecBal = cleanNumber(getValue("Current ZEC balance"));
-      const usdBal = cleanNumber(getValue("Current USD balance"));
-      const usdRes = cleanNumber(getValue("USD reserves"));
-      const futureLiab = cleanNumber(getValue("Future grant liabilities"));
-      const unhedged = cleanNumber(getValue("Unhedged grant liabilities (USD)"));
-      const zecAccTotal = cleanNumber(getValue("Total ZEC accrued to date"));
-      const zecDev1 = cleanNumber(getValue("ZEC accrued from 1st Dev Fund"));
-      const zecDev2 = cleanNumber(getValue("ZEC accrued from 2nd Dev Fund"));
-      const zecDev3 = cleanNumber(getValue("ZEC accrued from 3rd Dev Fund"));
-  
-      const totalUSD = usdBal;
-      const zecValueUSD = zecBal * zecPrice;
-      const totalTreasuryUSD = zecValueUSD + totalUSD;
-  
-      // Monthly inflow: 144 ZEC/day × 30 days = 4320 ZEC
-      const MONTHLY_ZEC_INFLOW = 4320;
-      const monthlyInflowUSD = MONTHLY_ZEC_INFLOW * zecPrice;
-  
-      // Hedging calculation
-      const overhedged = usdRes;
-  
-      // Get grant stats
-      const grantStats = await computeGrantStats();
-  
-      const usdMetricsEl = document.getElementById("usdMetrics");
-      const activityEl = document.getElementById("activityMetrics");
-  
-      if (!usdMetricsEl || !activityEl) return;
-  
-      // Card 1: Total Treasury Value
-      const cardTreasury = `
-        <div class="stat-card">
-          <div class="stat-label">Total Treasury Value</div>
-          <div class="stat-value">${formatUSD(totalTreasuryUSD)}</div>
-          <div class="stat-change" style="margin-top:0.5rem;">
-            <div><strong>ZEC:</strong> ${zecBal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-            <div><strong>USD:</strong> ${formatUSD(totalUSD)}</div>
-            <div style="margin-top:0.25rem;color:var(--text-tertiary);">ZEC price: $${zecPrice.toFixed(2)}</div>
-          </div>
-        </div>
-      `;
-  
-      // Card 2: ZEC Accrued
-      const cardAccrued = `
-        <div class="stat-card">
-          <div class="stat-label">ZEC Accrued (Total)</div>
-          <div class="stat-value">${zecAccTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} ZEC</div>
-          <div class="stat-change" style="margin-top:0.5rem;">
-            <div>1st Dev Fund: ${zecDev1.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-            <div>2nd Dev Fund: ${zecDev2.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-            <div>3rd Dev Fund: ${zecDev3.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-          </div>
-        </div>
-      `;
-  
-      // Card 3: Monthly Stats
-      const cardMonthly = `
-        <div class="stat-card">
-          <div class="stat-label">Monthly Stats</div>
-          <div class="stat-change" style="margin-top:0.25rem;">
-            <div><strong>Dev Fund Inflow:</strong> ${MONTHLY_ZEC_INFLOW.toLocaleString()} ZEC (${formatUSD(monthlyInflowUSD)})</div>
-            <div style="margin-top:0.5rem;"><strong>Avg Payout (30d):</strong> ${formatUSD(grantStats.avgPayout30d)} / ${grantStats.avgPayoutZec30d.toFixed(2)} ZEC</div>
-            <div style="margin-top:0.5rem;"><strong>Approved (30d):</strong> ${formatUSD(grantStats.approvedBudget30d)}</div>
-          </div>
-        </div>
-      `;
-  
-      // Card 4: Future Liabilities
-      let liabDetails = `<div><strong>Approved Grants:</strong> ${formatUSD(futureLiab)}</div>`;
-      if (overhedged > 0) {
-        liabDetails += `<div style="color:var(--success);"><strong>Overhedged:</strong> +${formatUSD(overhedged)}</div>`;
-      }
-      if (unhedged > 0) {
-        liabDetails += `<div style="color:var(--warning);"><strong>Unhedged:</strong> ${formatUSD(unhedged)}</div>`;
-      }
-  
-      const cardLiabilities = `
-        <div class="stat-card">
-          <div class="stat-label">Future Liabilities</div>
-          <div class="stat-value">${formatUSD(futureLiab)}</div>
-          <div class="stat-change" style="margin-top:0.5rem;">
-            ${liabDetails}
-          </div>
-        </div>
-      `;
-  
-      usdMetricsEl.innerHTML = cardTreasury + cardAccrued + cardMonthly + cardLiabilities;
-  
-      // Card 5: Total Grants
-      const cardGrants = `
-        <div class="stat-card">
-          <div class="stat-label">Total Grants</div>
-          <div class="stat-value">${grantStats.totalProjects.toLocaleString()}</div>
-          <div class="stat-change">Completed: ${grantStats.totalCompleted} • In Progress: ${grantStats.inProgress} • Pending: ${grantStats.waiting}</div>
-        </div>
-      `;
-  
-      // Card 6: YTD Activity
-      const cardYTD = `
-        <div class="stat-card">
-          <div class="stat-label">${grantStats.year} Activity</div>
-          <div class="stat-value">${grantStats.approvedYTD} Approved</div>
-          <div class="stat-change">
-            Completed YTD: ${grantStats.completedYTD}<br>
-            Payouts YTD: ${formatUSD(grantStats.payoutsYTDUSD)}
-          </div>
-        </div>
-      `;
-  
-      // Card 7: Avg Monthly Payout (12 months)
-      const cardPayout = `
-        <div class="stat-card">
-          <div class="stat-label">Avg Monthly Payout (12m)</div>
-          <div class="stat-value">${formatUSD(grantStats.avgMonthlyPayout12m)}</div>
-          <div class="stat-change">${grantStats.avgMonthlyPayoutZec12m.toFixed(2)} ZEC/month</div>
-        </div>
-      `;
-  
-      activityEl.innerHTML = cardGrants + cardYTD + cardPayout;
-  
-      // Load charts
-      loadPayoutsChart();
-      loadCategoryChart();
-      loadZecPriceTrend();
-      loadApprovedChart();
-  
-    } catch (error) {
-      console.error("Error in loadOverview:", error);
-      const usdEl = document.getElementById("usdMetrics");
-      const actEl = document.getElementById("activityMetrics");
-      if (usdEl) usdEl.innerHTML = '<div class="loading-placeholder">Error loading treasury metrics</div>';
-      if (actEl) actEl.innerHTML = '<div class="loading-placeholder">Error loading grants metrics</div>';
     }
+
+    // Get values from sheet
+    const zecPrice = cleanNumber(getValue("ZECUSD price"));
+    const zecBal = cleanNumber(getValue("Current ZEC balance"));
+    const usdBal = cleanNumber(getValue("Current USD balance"));
+    const usdRes = cleanNumber(getValue("USD reserves"));
+    const futureLiab = cleanNumber(getValue("Future grant liabilities"));
+
+    const zecValueUSD = zecBal * zecPrice;
+    const totalTreasuryUSD = zecValueUSD + usdBal;
+
+    // Dev Fund Inflow Calculations
+    // 1,152 blocks/day * 1.5625 ZEC/block * 8% = 144 ZEC/day
+    const DAILY_ZEC_INFLOW = 144;
+    const MONTHLY_ZEC_INFLOW = DAILY_ZEC_INFLOW * 30; // 4320
+    const dailyInflowUSD = DAILY_ZEC_INFLOW * zecPrice;
+    const monthlyInflowUSD = MONTHLY_ZEC_INFLOW * zecPrice;
+
+    // Get grant stats
+    const grantStats = await computeGrantStats();
+
+    const usdMetricsEl = document.getElementById("usdMetrics");
+    const activityEl = document.getElementById("activityMetrics");
+
+    if (!usdMetricsEl || !activityEl) return;
+
+    // --- CARD 1: TOTAL TREASURY VALUE ---
+    const cardTreasury = `
+      <div class="stat-card">
+        <div class="stat-label">Total Treasury Value</div>
+        <div class="stat-value">${formatUSD(totalTreasuryUSD)}</div>
+        <div class="stat-change" style="margin-top:0.5rem;">
+          <div><strong>ZEC Price:</strong> $${zecPrice.toFixed(2)}</div>
+          <div><strong>ZEC:</strong> ${zecBal.toLocaleString(undefined, { maximumFractionDigits: 0 })} (${formatUSD(zecValueUSD)})</div>
+          <div><strong>USD Stables:</strong> ${formatUSD(usdBal)}</div>
+        </div>
+      </div>
+    `;
+
+    // --- CARD 2: MONTHLY INFLOW & OUTFLOW ---
+    const netChange = monthlyInflowUSD - grantStats.avgMonthlyPayout12m;
+    const netChangeClass = netChange >= 0 ? "color:var(--success)" : "color:var(--danger)";
+    
+    const cardMonthly = `
+      <div class="stat-card">
+        <div class="stat-label">Monthly Inflow & Outflow</div>
+        <div class="stat-value" style="${netChangeClass}">${netChange >= 0 ? '+' : ''}${formatUSD(netChange)} / mo</div>
+        <div class="stat-change" style="margin-top:0.5rem;">
+          <div><strong>Income:</strong> ${MONTHLY_ZEC_INFLOW.toLocaleString()} ZEC (${formatUSD(monthlyInflowUSD)})</div>
+          <div style="font-size:0.8em;color:var(--text-tertiary);">(${DAILY_ZEC_INFLOW} ZEC/day)</div>
+          <div style="margin-top:0.35rem;"><strong>Payouts:</strong> ${formatUSD(grantStats.avgMonthlyPayout12m)}</div>
+        </div>
+      </div>
+    `;
+
+    // --- CARD 3: FUTURE LIABILITIES ---
+    // Logic: If USD reserves > future liabilities, we have "Extra Hedge".
+    // If USD reserves < future liabilities, we have "Unhedged".
+    const extraHedge = usdRes - futureLiab;
+    let hedgeDisplay = "";
+    
+    if (extraHedge >= 0) {
+      hedgeDisplay = `<div style="color:var(--success);"><strong>Extra Hedge:</strong> +${formatUSD(extraHedge)}</div>`;
+    } else {
+      hedgeDisplay = `<div style="color:var(--warning);"><strong>Unhedged:</strong> ${formatUSD(extraHedge)}</div>`;
+    }
+
+    const cardLiabilities = `
+      <div class="stat-card">
+        <div class="stat-label">Future Liabilities</div>
+        <div class="stat-value">${formatUSD(futureLiab)}</div>
+        <div class="stat-change" style="margin-top:0.5rem;">
+          <div><strong>Approved Grants:</strong> ${formatUSD(futureLiab)}</div>
+          ${hedgeDisplay}
+        </div>
+      </div>
+    `;
+
+    // --- CARD 4: TOTAL GRANTS ---
+    const avgGrantSizeAllTime = grantStats.totalProjects > 0 
+      ? grantStats.totalApprovedBudget / grantStats.totalProjects 
+      : 0;
+
+    const cardGrants = `
+      <div class="stat-card">
+        <div class="stat-label">Total Grants</div>
+        <div class="stat-value">${grantStats.totalProjects.toLocaleString()}</div>
+        <div class="stat-change">
+          <div><strong>Status:</strong> ${grantStats.totalCompleted} Done • ${grantStats.inProgress} Active • ${grantStats.waiting} Pending</div>
+          <div style="margin-top:0.35rem;"><strong>Avg Size:</strong> ${formatUSD(avgGrantSizeAllTime)}</div>
+        </div>
+      </div>
+    `;
+
+    // --- CARD 5: 2026 ACTIVITY ---
+    const avgGrantSizeYTD = grantStats.approvedYTD > 0 
+      ? grantStats.approvedBudgetYTD / grantStats.approvedYTD 
+      : 0;
+
+    const cardYTD = `
+      <div class="stat-card">
+        <div class="stat-label">${grantStats.year} Activity</div>
+        <div class="stat-value">${grantStats.approvedYTD} Approved</div>
+        <div class="stat-change">
+          <div><strong>Completed:</strong> ${grantStats.completedYTD}</div>
+          <div><strong>Payouts:</strong> ${formatUSD(grantStats.payoutsYTDUSD)}</div>
+          <div><strong>New Liabilities:</strong> ${formatUSD(grantStats.approvedBudgetYTD)}</div>
+          <div style="margin-top:0.35rem;"><strong>Avg Size:</strong> ${formatUSD(avgGrantSizeYTD)}</div>
+        </div>
+      </div>
+    `;
+
+    // --- CARD 6: AVG MONTHLY PAYOUTS (12M) ---
+    const cardPayout = `
+      <div class="stat-card">
+        <div class="stat-label">Avg Monthly Payouts (12m)</div>
+        <div class="stat-value">${formatUSD(grantStats.avgMonthlyPayout12m)}</div>
+        <div class="stat-change">${grantStats.avgMonthlyPayoutZec12m.toFixed(2)} ZEC/month</div>
+      </div>
+    `;
+
+    // Assign cards to containers
+    usdMetricsEl.innerHTML = cardTreasury + cardMonthly + cardLiabilities;
+    activityEl.innerHTML = cardGrants + cardYTD + cardPayout;
+
+    // Load charts
+    loadPayoutsChart();
+    loadCategoryChart();
+    loadZecPriceTrend();
+    loadApprovedChart();
+
+  } catch (error) {
+    console.error("Error in loadOverview:", error);
+    const usdEl = document.getElementById("usdMetrics");
+    const actEl = document.getElementById("activityMetrics");
+    if (usdEl) usdEl.innerHTML = '<div class="loading-placeholder">Error loading treasury metrics</div>';
+    if (actEl) actEl.innerHTML = '<div class="loading-placeholder">Error loading grants metrics</div>';
   }
+}
 
 /* ===== Payouts Chart ===== */
 async function loadPayoutsChart() {
