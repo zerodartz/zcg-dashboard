@@ -19,8 +19,6 @@ let pendingGrantToOpen = null;
 let paidOutOriginal = [];
 let futureOriginal = [];
 let paidOutRawFunds = [];
-let paidOutRawGrants = [];
-let currentPaymentsTimeFilter = "max";
 let currentPaidOutAmountFilter = "all";
 
 // Approved chart
@@ -2065,35 +2063,7 @@ function closeModal() {
     return false;
   }
 
-
 /* ===== PAYMENTS ===== */
-function currentPaymentsRangeLabel() {
-  switch (currentPaymentsTimeFilter) {
-    case "1m": return " (Last 1m)";
-    case "3m": return " (Last 3m)";
-    case "ytd": return ` (YTD ${new Date().getFullYear()})`;
-    default: return " (Max)";
-  }
-}
-
-function applyTimeFilter(rawRows, range) {
-  if (!Array.isArray(rawRows)) return [];
-  if (range === "max") return rawRows.slice();
-
-  const now = new Date();
-  let start = new Date();
-
-  switch (range) {
-    case "1m": start.setMonth(now.getMonth() - 1); break;
-    case "3m": start.setMonth(now.getMonth() - 3); break;
-    case "ytd": start = new Date(now.getFullYear(), 0, 1); break;
-    default: return rawRows.slice();
-  }
-  return rawRows.filter((row) => {
-    const d = toDate(row.date);
-    return d && d >= start;
-  });
-}
 
 function aggregateByGrantee(rawRows) {
   const by = {};
@@ -2108,18 +2078,25 @@ function aggregateByGrantee(rawRows) {
 function applyAmountFilter(aggregated, range) {
   if (range === "all") return aggregated.slice();
   switch (range) {
-    case "small": return aggregated.filter((d) => d.amount < 50000);
-    case "medium": return aggregated.filter((d) => d.amount >= 50000 && d.amount <= 200000);
-    case "large": return aggregated.filter((d) => d.amount > 200000);
-    default: return aggregated.slice();
+    case "small":
+      return aggregated.filter((d) => d.amount < 50000);
+    case "medium":
+      return aggregated.filter(
+        (d) => d.amount >= 50000 && d.amount <= 200000
+      );
+    case "large":
+      return aggregated.filter((d) => d.amount > 200000);
+    default:
+      return aggregated.slice();
   }
 }
 
 function getPaidOutDataForChart() {
-  const sourceRaw = currentPaymentsTimeFilter === "max" ? paidOutRawFunds : paidOutRawGrants;
-  const timeFiltered = applyTimeFilter(sourceRaw, currentPaymentsTimeFilter);
-  const aggregated = aggregateByGrantee(timeFiltered);
-  const amountFiltered = applyAmountFilter(aggregated, currentPaidOutAmountFilter);
+  const aggregated = aggregateByGrantee(paidOutRawFunds);
+  const amountFiltered = applyAmountFilter(
+    aggregated,
+    currentPaidOutAmountFilter
+  );
   return amountFiltered;
 }
 
@@ -2129,23 +2106,29 @@ function renderPaidOutChart(data) {
   if (ctx.chart) ctx.chart.destroy();
 
   const titleEl = document.getElementById("paidOutTitle");
-  if (titleEl) titleEl.textContent = "Total Paid Out" + currentPaymentsRangeLabel();
+  if (titleEl) titleEl.textContent = "Total Paid Out";
 
-  ctx.parentElement.style.height = Math.max(200, data.length * 30) + "px";
+  ctx.parentElement.style.height =
+    Math.max(200, data.length * 30) + "px";
 
-  const totalPaid = data.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalPaid = data.reduce(
+    (sum, d) => sum + (d.amount || 0),
+    0
+  );
 
   ctx.chart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: data.map((d) => d.grantee),
-      datasets: [{
-        label: "Total Paid Out (USD)",
-        data: data.map((d) => d.amount),
-        backgroundColor: "rgba(243, 166, 34, 0.7)",
-        borderColor: "#f3a622",
-        borderWidth: 1
-      }]
+      datasets: [
+        {
+          label: "Total Paid Out (USD)",
+          data: data.map((d) => d.amount),
+          backgroundColor: "rgba(243, 166, 34, 0.7)",
+          borderColor: "#f3a622",
+          borderWidth: 1,
+        },
+      ],
     },
     options: {
       ...getChartOptions(),
@@ -2156,20 +2139,26 @@ function renderPaidOutChart(data) {
           callbacks: {
             label: function (context) {
               const value = context.parsed.x || 0;
-              const pct = totalPaid > 0 ? ((value / totalPaid) * 100).toFixed(1) : "0.0";
+              const pct =
+                totalPaid > 0
+                  ? ((value / totalPaid) * 100).toFixed(1)
+                  : "0.0";
               return `${formatUSD(value)} (${pct}%)`;
-            }
-          }
-        }
+            },
+          },
+        },
       },
       scales: {
         x: {
           ...getChartOptions().scales.x,
           title: { display: true, text: "USD" },
-          ticks: { ...getChartOptions().scales.x.ticks, callback: (v) => formatUSD(v) }
-        }
-      }
-    }
+          ticks: {
+            ...getChartOptions().scales.x.ticks,
+            callback: (v) => formatUSD(v),
+          },
+        },
+      },
+    },
   });
 }
 
@@ -2178,19 +2167,22 @@ function renderFutureChart(data) {
   if (!ctx) return;
   if (ctx.chart) ctx.chart.destroy();
 
-  ctx.parentElement.style.height = Math.max(200, data.length * 30) + "px";
+  ctx.parentElement.style.height =
+    Math.max(200, data.length * 30) + "px";
 
   ctx.chart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: data.map((d) => d.grantee),
-      datasets: [{
-        label: "Future Milestones (USD)",
-        data: data.map((d) => d.amount),
-        backgroundColor: "rgba(124, 176, 255, 0.7)",
-        borderColor: "#7cb0ff",
-        borderWidth: 1
-      }]
+      datasets: [
+        {
+          label: "Future Milestones (USD)",
+          data: data.map((d) => d.amount),
+          backgroundColor: "rgba(124, 176, 255, 0.7)",
+          borderColor: "#7cb0ff",
+          borderWidth: 1,
+        },
+      ],
     },
     options: {
       ...getChartOptions(),
@@ -2199,23 +2191,13 @@ function renderFutureChart(data) {
       scales: {
         x: {
           ...getChartOptions().scales.x,
-          ticks: { ...getChartOptions().scales.x.ticks, callback: (v) => formatUSD(v) }
-        }
-      }
-    }
-  });
-}
-
-function setupPaymentsTimeFilters() {
-  const container = document.getElementById("paymentsTimeFilters");
-  if (!container) return;
-  container.querySelectorAll(".filter-tab").forEach((pill) => {
-    pill.addEventListener("click", () => {
-      container.querySelectorAll(".filter-tab").forEach((p) => p.classList.remove("active"));
-      pill.classList.add("active");
-      currentPaymentsTimeFilter = pill.dataset.range || "max";
-      renderPaidOutChart(getPaidOutDataForChart());
-    });
+          ticks: {
+            ...getChartOptions().scales.x.ticks,
+            callback: (v) => formatUSD(v),
+          },
+        },
+      },
+    },
   });
 }
 
@@ -2224,7 +2206,9 @@ function setupPaidOutAmountFilters() {
   if (!container) return;
   container.querySelectorAll(".filter-tab").forEach((pill) => {
     pill.addEventListener("click", () => {
-      container.querySelectorAll(".filter-tab").forEach((p) => p.classList.remove("active"));
+      container
+        .querySelectorAll(".filter-tab")
+        .forEach((p) => p.classList.remove("active"));
       pill.classList.add("active");
       currentPaidOutAmountFilter = pill.dataset.range || "all";
       renderPaidOutChart(getPaidOutDataForChart());
@@ -2237,15 +2221,22 @@ function setupChartFilters(containerId, originalData, renderFn) {
   if (!container) return;
   container.querySelectorAll(".filter-tab").forEach((pill) => {
     pill.addEventListener("click", () => {
-      container.querySelectorAll(".filter-tab").forEach((p) => p.classList.remove("active"));
+      container
+        .querySelectorAll(".filter-tab")
+        .forEach((p) => p.classList.remove("active"));
       pill.classList.add("active");
 
       const range = pill.dataset.range;
       let filtered = [...originalData];
 
-      if (range === "small") filtered = filtered.filter((d) => d.amount < 50000);
-      if (range === "medium") filtered = filtered.filter((d) => d.amount >= 50000 && d.amount <= 200000);
-      if (range === "large") filtered = filtered.filter((d) => d.amount > 200000);
+      if (range === "small")
+        filtered = filtered.filter((d) => d.amount < 50000);
+      if (range === "medium")
+        filtered = filtered.filter(
+          (d) => d.amount >= 50000 && d.amount <= 200000
+        );
+      if (range === "large")
+        filtered = filtered.filter((d) => d.amount > 200000);
 
       renderFn(filtered);
     });
@@ -2264,36 +2255,61 @@ async function loadPayouts() {
     for (let i = 0; i < Math.min(aoaFunds.length, 10); i++) {
       const row = aoaFunds[i] || [];
       const rowText = row.join(" ").toLowerCase();
-      if (rowText.includes("recipient") && rowText.includes("paid out")) {
+      if (
+        rowText.includes("recipient") &&
+        rowText.includes("paid out")
+      ) {
         headerRowIndex = i;
         break;
       }
     }
 
     if (headerRowIndex === -1) {
-      console.error("Could not find header row in Funds Distribution sheet");
+      console.error(
+        "Could not find header row in Funds Distribution sheet"
+      );
       return;
     }
 
     console.log("Found header row at index:", headerRowIndex);
 
-    const headersF = (aoaFunds[headerRowIndex] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
+    const headersF = (aoaFunds[headerRowIndex] || []).map((h) =>
+      (h || "").toString().replace(/\u00A0/g, " ").trim()
+    );
     console.log("Headers found:", headersF);
 
     // Data starts right after the header row
-    const dataRowsF = aoaFunds.slice(headerRowIndex + 1).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
+    const dataRowsF = aoaFunds
+      .slice(headerRowIndex + 1)
+      .filter((r) =>
+        r.some(
+          (c) => c !== null && c !== undefined && c !== ""
+        )
+      );
     const objF = dataRowsF.map((r) => {
       const o = {};
-      headersF.forEach((h, i) => { if (h) o[h] = r[i]; });
+      headersF.forEach((h, i) => {
+        if (h) o[h] = r[i];
+      });
       return o;
     });
 
     // Find columns (case-insensitive)
-    const recipientColF = headersF.find((h) => /recipient|classification/i.test(h));
-    const paidOutAmtColF = headersF.find((h) => /paid\s*out/i.test(h));
-    const futureColF = headersF.find((h) => /future\s*milestones/i.test(h));
+    const recipientColF = headersF.find((h) =>
+      /recipient|classification/i.test(h)
+    );
+    const paidOutAmtColF = headersF.find((h) =>
+      /paid\s*out/i.test(h)
+    );
+    const futureColF = headersF.find((h) =>
+      /future\s*milestones/i.test(h)
+    );
 
-    console.log("Column mapping:", { recipientColF, paidOutAmtColF, futureColF });
+    console.log("Column mapping:", {
+      recipientColF,
+      paidOutAmtColF,
+      futureColF,
+    });
 
     if (!recipientColF || !paidOutAmtColF || !futureColF) {
       console.error("Missing required columns");
@@ -2301,37 +2317,53 @@ async function loadPayouts() {
     }
 
     paidOutRawFunds = objF
-  .filter((r) => {
-    const recipient = (r[recipientColF] || "").toString().trim().toLowerCase();
-    return cleanNumber(r[paidOutAmtColF]) > 0 && 
-           r[recipientColF] && 
-           !recipient.includes("total");  // Exclude "Total" rows
-  })
-  .map((r) => ({
-    grantee: (r[recipientColF] || "").toString().trim(),
-    amount: cleanNumber(r[paidOutAmtColF]),
-    date: ""
-  }));
+      .filter((r) => {
+        const recipient = (r[recipientColF] || "")
+          .toString()
+          .trim()
+          .toLowerCase();
+        return (
+          cleanNumber(r[paidOutAmtColF]) > 0 &&
+          r[recipientColF] &&
+          !recipient.includes("total")
+        );
+      })
+      .map((r) => ({
+        grantee: (r[recipientColF] || "").toString().trim(),
+        amount: cleanNumber(r[paidOutAmtColF]),
+        date: "",
+      }));
 
     const aggF = {};
-    paidOutRawFunds.forEach((r) => { aggF[r.grantee] = (aggF[r.grantee] || 0) + r.amount; });
-    paidOutOriginal = Object.entries(aggF).map(([grantee, amount]) => ({ grantee, amount })).sort((a, b) => b.amount - a.amount);
+    paidOutRawFunds.forEach((r) => {
+      aggF[r.grantee] = (aggF[r.grantee] || 0) + r.amount;
+    });
+    paidOutOriginal = Object.entries(aggF)
+      .map(([grantee, amount]) => ({ grantee, amount }))
+      .sort((a, b) => b.amount - a.amount);
 
-futureOriginal = objF
-  .map((r) => ({
-    grantee: (r[recipientColF] || "").toString().trim(),
-    amount: cleanNumber(r[futureColF])
-  }))
-  .filter((r) => r.amount > 0 && r.grantee !== "" && !r.grantee.toLowerCase().includes("total"))
-  .sort((a, b) => b.amount - a.amount);
+    futureOriginal = objF
+      .map((r) => ({
+        grantee: (r[recipientColF] || "").toString().trim(),
+        amount: cleanNumber(r[futureColF]),
+      }))
+      .filter(
+        (r) =>
+          r.amount > 0 &&
+          r.grantee !== "" &&
+          !r.grantee.toLowerCase().includes("total")
+      )
+      .sort((a, b) => b.amount - a.amount);
 
     renderPaidOutChart(getPaidOutDataForChart());
     renderFutureChart(futureOriginal);
 
     setupPaidOutAmountFilters();
-    setupPaymentsTimeFilters();
-    setupChartFilters("futureFilters", futureOriginal, renderFutureChart);
-
+    setupChartFilters(
+      "futureFilters",
+      futureOriginal,
+      renderFutureChart
+    );
   } catch (error) {
     console.error("Error loading payouts data:", error);
   }
