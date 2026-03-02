@@ -2254,8 +2254,8 @@ async function loadLiquidity() {
 
     const COL_PROJECT = 0;
     const COL_AMOUNT_USD = 1;
-    const COL_KPI_LABEL = 7;
-    const COL_KPI_VALUE = 8;
+    const COL_KPI_LABEL = 7;  // Column H
+    const COL_KPI_VALUE = 8;  // Column I
 
     const norm = (s) => (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
 
@@ -2264,7 +2264,8 @@ async function loadLiquidity() {
     let usdValueWallet = 0;
     let gainLossKPI = 0;
 
-    for (let r = 0; r < aoa.length; r++) {
+    // Look for KPI data starting from row 2 (index 2)
+    for (let r = 2; r < aoa.length; r++) {
       const label = aoa[r]?.[COL_KPI_LABEL];
       const value = aoa[r]?.[COL_KPI_VALUE];
 
@@ -2273,14 +2274,15 @@ async function loadLiquidity() {
       const k = norm(label);
       const v = cleanNumber(value);
 
-      if (k === "zec") zecBalance = v;
+      if (k === "usd value in wallet") usdValueWallet = v;
+      else if (k === "zec") zecBalance = v;
       else if (k === "cacao") cacaoBalance = v;
-      else if (k === "usd value in wallet") usdValueWallet = v;
       else if (k.includes("gain/loss")) gainLossKPI = v;
     }
 
+    // Calculate total liquidity added from project data
     let totalLiquidityAdded = 0;
-    for (let r = 0; r < aoa.length; r++) {
+    for (let r = 1; r < aoa.length; r++) {  // Start from row 1 (index 1) since row 0 is header
       const proj = aoa[r]?.[COL_PROJECT];
       if (!proj) continue;
       const amt = cleanNumber(aoa[r]?.[COL_AMOUNT_USD]);
