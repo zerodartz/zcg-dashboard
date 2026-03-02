@@ -873,13 +873,11 @@ async function loadCategoryChart() {
       return;
     }
 
-    // Use columns O and P (index 14 and 15) for Classification and USD paid out to date
     const COL_CLASSIFICATION = 14; // Column O
     const COL_USD_PAID = 15; // Column P
 
     const categoryTotals = {};
 
-    // Process data - start from row 2 (skip header row)
     for (let r = 2; r < aoa.length; r++) {
       const row = aoa[r] || [];
       const labelCell = row[COL_CLASSIFICATION];
@@ -887,7 +885,7 @@ async function loadCategoryChart() {
 
       if (typeof labelCell === "string" && labelCell.trim()) {
         const label = labelCell.trim();
-        if (label.length > 0 && label !== "TOTAL") { // Skip TOTAL row
+        if (label.length > 0 && label !== "TOTAL") {
           const amount = cleanNumber(valueCell);
           if (amount > 0) {
             categoryTotals[label] = (categoryTotals[label] || 0) + amount;
@@ -895,8 +893,6 @@ async function loadCategoryChart() {
         }
       }
     }
-
-    console.log("Category data found:", categoryTotals);
 
     const entries = Object.entries(categoryTotals).filter(([, v]) => v > 0);
     if (!entries.length) {
@@ -907,30 +903,55 @@ async function loadCategoryChart() {
     const sorted = entries.sort((a, b) => b[1] - a[1]);
     const labels = sorted.map(([cat]) => cat);
     const data = sorted.map(([, amount]) => amount);
+    const total = data.reduce((sum, v) => sum + v, 0);
+
+    // Generate colors
+    const colors = [
+      "#FFF3C4", "#FFE08A", "#FFC04D", "#FFB347", "#FFA534",
+      "#FF9F1C", "#FF8C42", "#FF7F50", "#FF7043", "#FF6347",
+      "#F4511E", "#E64A19", "#D84315", "#BF360C", "#FFD166"
+    ];
 
     const ctx = document.getElementById("categoryChart");
     if (!ctx) return;
     if (ctx.chart) ctx.chart.destroy();
 
     ctx.chart = new Chart(ctx, {
-      type: "bar",
+      type: "doughnut",
       data: {
         labels,
         datasets: [{
           data,
-          backgroundColor: labels.map((_, i) => `rgba(255, 193, 124, ${Math.max(0.85 - i * 0.08, 0.35)})`),
-          borderColor: getComputedStyle(document.documentElement).getPropertyValue("--accent-primary").trim(),
-          borderWidth: 1
+          backgroundColor: colors.slice(0, labels.length),
+          borderColor: getComputedStyle(document.documentElement).getPropertyValue("--bg-primary").trim() || "#1a1a2e",
+          borderWidth: 2,
+          hoverOffset: 8
         }]
       },
       options: {
-        ...getChartOptions(),
-        indexAxis: "y",
-        plugins: { legend: { display: false } },
-        scales: {
-          x: {
-            ...getChartOptions().scales.x,
-            ticks: { ...getChartOptions().scales.x.ticks, callback: (v) => formatUSD(v) }
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: "35%", // Hole in the middle
+        plugins: {
+          legend: {
+            display: true,
+            position: "right",
+            labels: {
+              color: getComputedStyle(document.documentElement).getPropertyValue("--text-secondary").trim(),
+              font: { size: 11 },
+              padding: 12,
+              usePointStyle: true,
+              pointStyle: "circle"
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: function (context) {
+                const value = context.parsed || 0;
+                const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+                return `${context.label}: ${formatUSD(value)} (${pct}%)`;
+              }
+            }
           }
         }
       }
@@ -940,7 +961,6 @@ async function loadCategoryChart() {
     document.getElementById("categoryChart").parentNode.innerHTML = '<div class="loading-placeholder">Error loading category data</div>';
   }
 }
-
 /* ===== ZEC Price Trend ===== */
 async function loadZecPriceTrend() {
   try {
