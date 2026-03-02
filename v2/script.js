@@ -2293,8 +2293,7 @@ async function loadLiquidity() {
     await loadWorkbook();
     const aoa = sheetToAoA(SHEETS.LIQUIDITY);
     if (!aoa.length) {
-      document.getElementById("liquidityContent").innerHTML =
-        '<div class="loading-placeholder">No liquidity data</div>';
+      document.getElementById("liquidityContent").innerHTML = '<div class="loading-placeholder">No liquidity data</div>';
       return;
     }
 
@@ -2334,7 +2333,7 @@ async function loadLiquidity() {
       const amt = cleanNumber(aoa[r]?.[COL_AMOUNT_USD]);
       if (amt > 0) totalLiquidityAdded += amt;
     }
-
+    
     const profitLoss = usdValueWallet - totalLiquidityAdded;
 
     const html = `
@@ -2352,7 +2351,7 @@ async function loadLiquidity() {
           <div class="liquidity-content">
             <div class="liquidity-icon liquidity-icon-bg">💵</div>
             <div>
-              <div class="liquidity-label">Current USD Value</div>
+              <div class="liquidity-label">Current Liquidity Value</div>
               <div class="liquidity-value">${formatUSD(usdValueWallet)}</div>
             </div>
           </div>
@@ -2361,7 +2360,7 @@ async function loadLiquidity() {
           <div class="liquidity-content">
             <div class="liquidity-icon liquidity-icon-bg">⚡</div>
             <div>
-              <div class="liquidity-label">ZEC Balance</div>
+              <div class="liquidity-label">ZEC Liquidity</div>
               <div class="liquidity-value">${formatZEC(zecBalance)}</div>
             </div>
           </div>
@@ -2370,17 +2369,8 @@ async function loadLiquidity() {
           <div class="liquidity-content">
             <div class="liquidity-icon liquidity-icon-bg">☕</div>
             <div>
-              <div class="liquidity-label">CACAO Balance</div>
+              <div class="liquidity-label">CACAO Liquidity</div>
               <div class="liquidity-value">${cacaoBalance.toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-        <div class="liquidity-card ${profitLoss >= 0 ? "positive" : "negative"}">
-          <div class="liquidity-content">
-            <div class="liquidity-icon liquidity-icon-bg">${profitLoss >= 0 ? "📈" : "📉"}</div>
-            <div>
-              <div class="liquidity-label">Profit / Loss</div>
-              <div class="liquidity-value">${profitLoss >= 0 ? "+" : ""}${formatUSD(profitLoss)}</div>
             </div>
           </div>
         </div>
@@ -2399,8 +2389,7 @@ async function loadLiquidity() {
     document.getElementById("liquidityContent").innerHTML = html;
   } catch (error) {
     console.error("Error loading liquidity data:", error);
-    document.getElementById("liquidityContent").innerHTML =
-      '<div class="loading-placeholder">Error loading liquidity data</div>';
+    document.getElementById("liquidityContent").innerHTML = '<div class="loading-placeholder">Error loading liquidity data</div>';
   }
 }
 
