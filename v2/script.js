@@ -941,6 +941,41 @@ async function loadCategoryChart() {
   }
 }
 
+/* ===== ZEC Price Trend ===== */
+async function loadZecPriceTrend() {
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=90");
+    const data = await res.json();
+
+    const filtered = data.prices.filter((_, i) => i % 24 === 0);
+    const prices = filtered.map((p) => ({ date: new Date(p[0]), price: p[1] }));
+
+    const ctx = document.getElementById("zecPriceChart");
+    if (!ctx) return;
+    if (ctx.chart) ctx.chart.destroy();
+
+    ctx.chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: prices.map((p) => p.date.toLocaleDateString()),
+        datasets: [{
+          label: "ZEC/USD",
+          data: prices.map((p) => p.price),
+          borderColor: getComputedStyle(document.documentElement).getPropertyValue("--accent-primary").trim(),
+          backgroundColor: "rgba(255,193,124,0.2)",
+          fill: true,
+          tension: 0.4,
+          pointRadius: 2,
+          pointHoverRadius: 5
+        }]
+      },
+      options: getChartOptions()
+    });
+  } catch (error) {
+    console.error("Error loading ZEC price:", error);
+  }
+}
+
 /* ===== Approved Grants Chart ===== */
 function filterByTimeApproved(raw, range) {
   if (!Array.isArray(raw)) return [];
