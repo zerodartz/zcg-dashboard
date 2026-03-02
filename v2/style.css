@@ -3,8 +3,8 @@
   --bg: #FEFEFE;
   --header: #F4F4F4;
   --card-bg: #fefefe;
-  --card-bg2: #FAFAFA;
-  --card-bg3: #f7f7f7;
+  --card-bg2: #F7F7F7;
+  --card-bg3: #F2F2F2;
   --text: #1c1c1e;
   --text-secondary: #6b7280;
   --text-tertiary: #9ca3af;
@@ -296,7 +296,7 @@ header {
 
 /* ===== Chart Cards ===== */
 .chart-card {
-  background: var(--card-bg);
+  background: var(--card-bg2);
   border-radius: 24px;
   padding: 1.5rem;
   border: none;
@@ -348,7 +348,7 @@ canvas {
 
 /* ===== Content Card ===== */
 .content-card {
-  background: var(--card-bg2);
+  background: var(--card-bg3);
   border-radius: 12px;
   padding: 1.5rem;
   border: none;
