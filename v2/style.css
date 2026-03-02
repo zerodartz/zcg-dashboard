@@ -238,7 +238,7 @@ header {
 }
 
 .stat-card {
-  background: var(--card-bg);
+  background: var(--card-bg2);
   border-radius: 12px;
   padding: 1.5rem;
   border: none;
@@ -360,6 +360,7 @@ canvas {
   gap: 0.4rem;
   flex-wrap: wrap;
   margin-bottom: 1rem;
+  background: var(--card-bg)
 }
 
 .filter-tab {
@@ -495,7 +496,7 @@ canvas {
 }
 
 .grant-card {
-  background: var(--card-bg);
+  background: var(--card-bg2);
   border-radius: 12px;
   padding: 1.5rem;
   border: none;
