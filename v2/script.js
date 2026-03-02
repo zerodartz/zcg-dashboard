@@ -2182,32 +2182,46 @@ async function loadPayouts() {
     await loadWorkbook();
 
     const aoaFunds = sheetToAoA(SHEETS.FUNDS);
-    if (aoaFunds.length < 4) {  // Need at least 4 rows (header + data)
-      document.getElementById("paidOutChart").parentNode.innerHTML = '<div class="loading-placeholder">Insufficient data in Funds Distribution sheet</div>';
-      document.getElementById("futureMilestonesChart").parentNode.innerHTML = '<div class="loading-placeholder">Insufficient data in Funds Distribution sheet</div>';
+    console.log("Funds sheet loaded, rows:", aoaFunds.length);
+
+    // Dynamically find the header row by looking for "Recipient"
+    let headerRowIndex = -1;
+    for (let i = 0; i < Math.min(aoaFunds.length, 10); i++) {
+      const row = aoaFunds[i] || [];
+      const rowText = row.join(" ").toLowerCase();
+      if (rowText.includes("recipient") && rowText.includes("paid out")) {
+        headerRowIndex = i;
+        break;
+      }
+    }
+
+    if (headerRowIndex === -1) {
+      console.error("Could not find header row in Funds Distribution sheet");
       return;
     }
 
-    // Headers are in row 3 (index 2)
-    const headersF = (aoaFunds[2] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
-    
-    // Data starts from row 4 (index 3)
-    const dataRowsF = aoaFunds.slice(3).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
+    console.log("Found header row at index:", headerRowIndex);
+
+    const headersF = (aoaFunds[headerRowIndex] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
+    console.log("Headers found:", headersF);
+
+    // Data starts right after the header row
+    const dataRowsF = aoaFunds.slice(headerRowIndex + 1).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
     const objF = dataRowsF.map((r) => {
       const o = {};
       headersF.forEach((h, i) => { if (h) o[h] = r[i]; });
       return o;
     });
 
-    // Find the correct column names (case-insensitive)
+    // Find columns (case-insensitive)
     const recipientColF = headersF.find((h) => /recipient|classification/i.test(h));
-    const paidOutAmtColF = headersF.find((h) => /usd\s*value\s*paid\s*out/i.test(h));  // Updated to match "USD value paid out to date"
+    const paidOutAmtColF = headersF.find((h) => /paid\s*out/i.test(h));
     const futureColF = headersF.find((h) => /future\s*milestones/i.test(h));
 
-    // Check if we found the required columns
+    console.log("Column mapping:", { recipientColF, paidOutAmtColF, futureColF });
+
     if (!recipientColF || !paidOutAmtColF || !futureColF) {
-      console.error("Could not find required columns in Funds Distribution sheet");
-      console.log("Available headers:", headersF);
+      console.error("Missing required columns");
       return;
     }
 
@@ -2216,7 +2230,7 @@ async function loadPayouts() {
       .map((r) => ({
         grantee: (r[recipientColF] || "").toString().trim(),
         amount: cleanNumber(r[paidOutAmtColF]),
-        date: ""  // No date column in this sheet
+        date: ""
       }));
 
     const aggF = {};
@@ -2237,13 +2251,11 @@ async function loadPayouts() {
     setupPaidOutAmountFilters();
     setupPaymentsTimeFilters();
     setupChartFilters("futureFilters", futureOriginal, renderFutureChart);
+
   } catch (error) {
     console.error("Error loading payouts data:", error);
-    document.getElementById("paidOutChart").parentNode.innerHTML = '<div class="loading-placeholder">Error loading payouts data</div>';
-    document.getElementById("futureMilestonesChart").parentNode.innerHTML = '<div class="loading-placeholder">Error loading payouts data</div>';
   }
 }
-
 /* ===== LIQUIDITY ===== */
 async function loadLiquidity() {
   try {
