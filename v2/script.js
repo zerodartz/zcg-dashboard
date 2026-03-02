@@ -625,7 +625,7 @@ async function computeGrantStats() {
 async function loadOverview() {
   try {
     await loadWorkbook();
-    const rows = sheetToAoA(SHEETS.DASHBOARD_ZCG);
+    const rows = sheetToAoA(SHEETS.DASHBOARD_ZCG, { blankrows: true });
 
     const norm = (s) =>
       (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
