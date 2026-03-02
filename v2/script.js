@@ -2257,24 +2257,29 @@ async function loadPayouts() {
     }
 
     paidOutRawFunds = objF
-      .filter((r) => cleanNumber(r[paidOutAmtColF]) > 0 && r[recipientColF])
-      .map((r) => ({
-        grantee: (r[recipientColF] || "").toString().trim(),
-        amount: cleanNumber(r[paidOutAmtColF]),
-        date: ""
-      }));
+  .filter((r) => {
+    const recipient = (r[recipientColF] || "").toString().trim().toLowerCase();
+    return cleanNumber(r[paidOutAmtColF]) > 0 && 
+           r[recipientColF] && 
+           !recipient.includes("total");  // Exclude "Total" rows
+  })
+  .map((r) => ({
+    grantee: (r[recipientColF] || "").toString().trim(),
+    amount: cleanNumber(r[paidOutAmtColF]),
+    date: ""
+  }));
 
     const aggF = {};
     paidOutRawFunds.forEach((r) => { aggF[r.grantee] = (aggF[r.grantee] || 0) + r.amount; });
     paidOutOriginal = Object.entries(aggF).map(([grantee, amount]) => ({ grantee, amount })).sort((a, b) => b.amount - a.amount);
 
-    futureOriginal = objF
-      .map((r) => ({
-        grantee: (r[recipientColF] || "").toString().trim(),
-        amount: cleanNumber(r[futureColF])
-      }))
-      .filter((r) => r.amount > 0 && r.grantee !== "")
-      .sort((a, b) => b.amount - a.amount);
+futureOriginal = objF
+  .map((r) => ({
+    grantee: (r[recipientColF] || "").toString().trim(),
+    amount: cleanNumber(r[futureColF])
+  }))
+  .filter((r) => r.amount > 0 && r.grantee !== "" && !r.grantee.toLowerCase().includes("total"))
+  .sort((a, b) => b.amount - a.amount);
 
     renderPaidOutChart(getPaidOutDataForChart());
     renderFutureChart(futureOriginal);
