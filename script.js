@@ -2065,7 +2065,36 @@ function closeModal() {
     return false;
   }
 
+
 /* ===== PAYMENTS ===== */
+function currentPaymentsRangeLabel() {
+  switch (currentPaymentsTimeFilter) {
+    case "1m": return " (Last 1m)";
+    case "3m": return " (Last 3m)";
+    case "ytd": return ` (YTD ${new Date().getFullYear()})`;
+    default: return " (Max)";
+  }
+}
+
+function applyTimeFilter(rawRows, range) {
+  if (!Array.isArray(rawRows)) return [];
+  if (range === "max") return rawRows.slice();
+
+  const now = new Date();
+  let start = new Date();
+
+  switch (range) {
+    case "1m": start.setMonth(now.getMonth() - 1); break;
+    case "3m": start.setMonth(now.getMonth() - 3); break;
+    case "ytd": start = new Date(now.getFullYear(), 0, 1); break;
+    default: return rawRows.slice();
+  }
+  return rawRows.filter((row) => {
+    const d = toDate(row.date);
+    return d && d >= start;
+  });
+}
+
 function aggregateByGrantee(rawRows) {
   const by = {};
   rawRows.forEach((r) => {
@@ -2307,6 +2336,7 @@ futureOriginal = objF
     console.error("Error loading payouts data:", error);
   }
 }
+
 /* ===== LIQUIDITY ===== */
 async function loadLiquidity() {
   try {
