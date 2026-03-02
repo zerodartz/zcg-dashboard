@@ -1178,7 +1178,7 @@ async function loadApprovedChart() {
 
     const aoa = sheetToAoA(SHEETS.ALL_GRANTS);
 
-    const COL_DATE = 0;
+    const COL_DATE = 6;
     const COL_TITLE = 1;
     const COL_DECISION = 5;
 
