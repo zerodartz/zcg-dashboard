@@ -760,7 +760,7 @@ async function loadOverview() {
         <div class="stat-value">${grantStats.totalProjects.toLocaleString()} Grants</div>
         <div class="stat-change">
           <div><strong>Status:</strong> ${grantStats.totalCompleted} Done · ${grantStats.inProgress} Active · ${grantStats.waiting} Pending</div>
-          <div class="stat-value"><strong>Total Paid Out:</strong> ${formatUSD(totalLifetimePayouts)}</div>
+          <div class="stat-value">Lifetime payouts:</strong> ${formatUSD(totalLifetimePayouts)}</div>
           <div style="margin-top:0.35rem;"><strong>Avg Budget:</strong> ${formatUSD(avgBudgetAllTime)}</div>
         </div>
       </div>
