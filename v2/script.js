@@ -641,6 +641,11 @@ async function loadOverview() {
       return row ? row[1] : null;
     };
 
+    const getCellValue = (rowIndex, colIndex) => {
+  const row = rows[rowIndex];
+  return row ? row[colIndex] : null;
+};
+
     const blockTimeUTC = getValue("Block time (UTC)");
     if (blockTimeUTC) {
       clearTimeout(updateTimeTimeout);
@@ -658,8 +663,8 @@ async function loadOverview() {
     const futureLiab = cleanNumber(getValue("Future grant liabilities"));
     
     // Get overhedge % from C49 (row 48 in 0-indexed array)
-    const overhedgePercent = cleanNumber(getValueByRow(48)) * 100 || cleanNumber(getValue("overhedge")) * 100;
-
+    const overhedgePercent = cleanNumber(getCellValue(48, 2)) * 100;
+    const totalLifetimePayouts = cleanNumber(getCellValue(42, 1));
     const zecValueUSD = zecBal * zecPrice;
     const totalTreasuryUSD = zecValueUSD + usdBal;
 
@@ -752,6 +757,7 @@ async function loadOverview() {
     const cardGrants = `
       <div class="stat-card">
         <div class="stat-label">Total Stats</div>
+        <div><strong>Total Paid Out:</strong> ${formatUSD(totalLifetimePayouts)}</div>
         <div class="stat-value">${grantStats.totalProjects.toLocaleString()} Grants</div>
         <div class="stat-change">
           <div><strong>Status:</strong> ${grantStats.totalCompleted} Done · ${grantStats.inProgress} Active · ${grantStats.waiting} Pending</div>
