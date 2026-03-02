@@ -26,6 +26,7 @@
 
 [data-theme="dark"] {
   --bg: #0f0f0f;
+  --header: #222222;
   --card-bg: #1a1a1a;
   --card-bg2: #1F1E1E;
   --card-bg3: #242323;
