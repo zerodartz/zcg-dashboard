@@ -755,10 +755,10 @@ async function loadOverview() {
     const cardGrants = `
       <div class="stat-card">
         <div class="stat-label">Total Stats</div>
+        <div class="stat-value">Lifetime payouts:</strong> ${formatUSD(totalLifetimePayouts)}</div>
         <div class="stat-value">${grantStats.totalProjects.toLocaleString()} Grants</div>
         <div class="stat-change">
           <div><strong>Status:</strong> ${grantStats.totalCompleted} Done · ${grantStats.inProgress} Active · ${grantStats.waiting} Pending</div>
-          <div class="stat-value">Lifetime payouts:</strong> ${formatUSD(totalLifetimePayouts)}</div>
           <div style="margin-top:0.35rem;"><strong>Avg Budget:</strong> ${formatUSD(avgBudgetAllTime)}</div>
         </div>
       </div>
