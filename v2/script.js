@@ -40,11 +40,8 @@ const sortModes = [
 ];
 
 /* ===== XLSX Source ===== */
-const GOOGLE_SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/edit?usp=sharing";
-
 const XLSX_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vS1zjfVFYsO5u8HTv-zF8XgbtgbywkFlLJ6UvFjRdZFnncHOlqWSR1be_ohfVxeUQ9gdDEtUciBMADb/pub?output=xlsx";
+  "https://docs.google.com/spreadsheets/d/1FQ28rDCyRW0TiNxrm3rgD8ai2KGUsXAjPieQmI1kKKg/export?format=xlsx";
   
 let workbook = null;
 
