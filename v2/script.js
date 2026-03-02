@@ -51,10 +51,10 @@ const SHEETS = {
   GRANTS_ZCG: "ZCG Grants",
   GRANTS_LOCKBOX: "Lockbox Grants",
   FUNDS: "ZCG Funds Distribution",
-  LIQUIDITY: "Liquidity",
-  STIPENDS: "ZCG 2025 Stipend",
+  LIQUIDITY: "ZCG Liquidity",  // <-- Changed from "Liquidity"
+  STIPENDS: "ZCG 2026 Stipend",
   IC_PAYOUTS: "ZCG IC Payouts",
-  BUDGET_2025: "ZCG 2025 Disc. Budget",
+  BUDGET_2025: "ZCG 2026 Disc. Budget",
   ALL_GRANTS: "ZCG All Grants Tracking"
 };
 
