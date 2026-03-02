@@ -390,7 +390,7 @@ canvas {
     overflow-x: hidden;
     max-width: 100vw;
   }
-
+}
 .filter-tab {
   padding: 0.5rem 1rem;
   border: none;
