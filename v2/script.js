@@ -2182,53 +2182,54 @@ async function loadPayouts() {
     await loadWorkbook();
 
     const aoaFunds = sheetToAoA(SHEETS.FUNDS);
-    if (aoaFunds.length >= 3) {
-      const headersF = (aoaFunds[3] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
-      const dataRowsF = aoaFunds.slice(4).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
-      const objF = dataRowsF.map((r) => {
-        const o = {};
-        headersF.forEach((h, i) => { if (h) o[h] = r[i]; });
-        return o;
-      });
-
-      const recipientColF = headersF.find((h) => /recipient|classification/i.test(h));
-      const paidOutAmtColF = headersF.find((h) => /paid\s*out/i.test(h));
-      const paidOutDateColF = headersF.find((h) => /(paid\s*out.*date|date.*paid\s*out|paid\s*out)/i.test(h)) || "Paid Out";
-      const futureColF = headersF.find((h) => /future\s*milestones/i.test(h));
-
-      paidOutRawFunds = objF
-        .filter((r) => cleanNumber(r[paidOutAmtColF]) > 0 && r[recipientColF])
-        .map((r) => ({
-          grantee: (r[recipientColF] || "").toString().trim(),
-          amount: cleanNumber(r[paidOutAmtColF]),
-          date: r[paidOutDateColF]
-        }));
-
-      const aggF = {};
-      paidOutRawFunds.forEach((r) => { aggF[r.grantee] = (aggF[r.grantee] || 0) + r.amount; });
-      paidOutOriginal = Object.entries(aggF).map(([grantee, amount]) => ({ grantee, amount })).sort((a, b) => b.amount - a.amount);
-
-      futureOriginal = objF
-        .map((r) => ({
-          grantee: (r[recipientColF] || "").toString().trim(),
-          amount: cleanNumber(r[futureColF])
-        }))
-        .filter((r) => r.amount > 0 && r.grantee !== "")
-        .sort((a, b) => b.amount - a.amount);
+    if (aoaFunds.length < 4) {  // Need at least 4 rows (header + data)
+      document.getElementById("paidOutChart").parentNode.innerHTML = '<div class="loading-placeholder">Insufficient data in Funds Distribution sheet</div>';
+      document.getElementById("futureMilestonesChart").parentNode.innerHTML = '<div class="loading-placeholder">Insufficient data in Funds Distribution sheet</div>';
+      return;
     }
 
-    const rowsG = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
-    const granteeGetter = (r) =>
-      (r["Grantee"] || r["Applicant(s)"] || r["Applicant"] || r["Recipient"] || "").toString().trim();
+    // Headers are in row 3 (index 2)
+    const headersF = (aoaFunds[2] || []).map((h) => (h || "").toString().replace(/\u00A0/g, " ").trim());
+    
+    // Data starts from row 4 (index 3)
+    const dataRowsF = aoaFunds.slice(3).filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
+    const objF = dataRowsF.map((r) => {
+      const o = {};
+      headersF.forEach((h, i) => { if (h) o[h] = r[i]; });
+      return o;
+    });
 
-    paidOutRawGrants = rowsG
-      .filter((r) => cleanNumber(r["Amount (USD)"]) > 0 && r["Paid Out"])
+    // Find the correct column names (case-insensitive)
+    const recipientColF = headersF.find((h) => /recipient|classification/i.test(h));
+    const paidOutAmtColF = headersF.find((h) => /usd\s*value\s*paid\s*out/i.test(h));  // Updated to match "USD value paid out to date"
+    const futureColF = headersF.find((h) => /future\s*milestones/i.test(h));
+
+    // Check if we found the required columns
+    if (!recipientColF || !paidOutAmtColF || !futureColF) {
+      console.error("Could not find required columns in Funds Distribution sheet");
+      console.log("Available headers:", headersF);
+      return;
+    }
+
+    paidOutRawFunds = objF
+      .filter((r) => cleanNumber(r[paidOutAmtColF]) > 0 && r[recipientColF])
       .map((r) => ({
-        grantee: granteeGetter(r),
-        amount: cleanNumber(r["Amount (USD)"]),
-        date: r["Paid Out"]
+        grantee: (r[recipientColF] || "").toString().trim(),
+        amount: cleanNumber(r[paidOutAmtColF]),
+        date: ""  // No date column in this sheet
+      }));
+
+    const aggF = {};
+    paidOutRawFunds.forEach((r) => { aggF[r.grantee] = (aggF[r.grantee] || 0) + r.amount; });
+    paidOutOriginal = Object.entries(aggF).map(([grantee, amount]) => ({ grantee, amount })).sort((a, b) => b.amount - a.amount);
+
+    futureOriginal = objF
+      .map((r) => ({
+        grantee: (r[recipientColF] || "").toString().trim(),
+        amount: cleanNumber(r[futureColF])
       }))
-      .filter((r) => r.grantee);
+      .filter((r) => r.amount > 0 && r.grantee !== "")
+      .sort((a, b) => b.amount - a.amount);
 
     renderPaidOutChart(getPaidOutDataForChart());
     renderFutureChart(futureOriginal);
@@ -2238,6 +2239,8 @@ async function loadPayouts() {
     setupChartFilters("futureFilters", futureOriginal, renderFutureChart);
   } catch (error) {
     console.error("Error loading payouts data:", error);
+    document.getElementById("paidOutChart").parentNode.innerHTML = '<div class="loading-placeholder">Error loading payouts data</div>';
+    document.getElementById("futureMilestonesChart").parentNode.innerHTML = '<div class="loading-placeholder">Error loading payouts data</div>';
   }
 }
 
