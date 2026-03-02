@@ -2,7 +2,7 @@
 :root {
   --bg: #FEFEFE;
   --header: #F4F4F4;
-  --card-bg: #f6f6f6;
+  --card-bg: #fefefe;
   --card-bg2: #f3f3f3;
   --text: #1c1c1e;
   --text-secondary: #6b7280;
@@ -130,7 +130,7 @@ header {
 }
 
 .nav-link.active {
-  color: var(--zcash-yellow);
+  color: var(--text);
   background: var(--nav-active);
   font-weight: 600;
 }
