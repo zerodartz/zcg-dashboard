@@ -660,7 +660,7 @@ async function loadOverview() {
     const zecPrice = cleanNumber(getValue("ZECUSD price"));
     const zecBal = cleanNumber(getValue("Current ZEC balance"));
     const usdBal = cleanNumber(getValue("Current USD balance"));
-    const futureLiab = cleanNumber(getValue("Future grant liabilities"));
+    const futureLiab = Math.abs(cleanNumber(getValue("Future grant liabilities")));
     
     // Get overhedge % from C49 (row 48 in 0-indexed array)
     const overhedgePercent = cleanNumber(getCellValue(48, 2)) * 100;
