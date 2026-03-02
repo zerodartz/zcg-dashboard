@@ -1,11 +1,13 @@
 /* ===== CSS Variables ===== */
 :root {
-  --bg: #ffffff;
-  --card-bg: #f5f5f5;
+  --bg: #FEFEFE;
+  --header: #F4F4F4;
+  --card-bg: #f6f6f6;
+  --card-bg2: #f3f3f3;
   --text: #1c1c1e;
   --text-secondary: #6b7280;
   --text-tertiary: #9ca3af;
-  --border: #e5e7eb;
+  --border: #EBF0F0;
   --zcash-yellow: #F4B728;
   --nav-active: rgba(244, 183, 40, 0.12);
   --accent-primary: #111111;
@@ -18,7 +20,7 @@
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
-  --grid-color: #e5e7eb;
+  --grid-color: #EDF0F5;
 }
 
 [data-theme="dark"] {
@@ -56,7 +58,7 @@ body {
 
 /* ===== Header ===== */
 header {
-  background: var(--bg);
+  background: var(--header);
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   position: sticky;
   top: 0;
@@ -345,7 +347,7 @@ canvas {
 
 /* ===== Content Card ===== */
 .content-card {
-  background: var(--card-bg);
+  background: var(--card-bg2);
   border-radius: 12px;
   padding: 1.5rem;
   border: none;
