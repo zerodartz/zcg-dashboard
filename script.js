@@ -2,6 +2,8 @@
 
 /* ===== Global Variables ===== */
 let workbook = null;
+let workbookPromise = null;
+
 let allGrants = [];
 let filteredGrants = [];
 let currentPayoutData = [];
@@ -27,10 +29,15 @@ const parsedSheetCache = {
 };
 
 let appData = null;
+let appDataPromise = null;
+let zecPricePromise = null;
 
 /* ===== Local Cache ===== */
-const LOCAL_CACHE_KEY = "zcg-dashboard-appdata-v2";
-const LOCAL_CACHE_TTL_MS = 5 * 60 * 1000;
+const LOCAL_CACHE_KEY = "zcg-dashboard-appdata-v3";
+const LOCAL_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+const ZEC_PRICE_CACHE_KEY = "zcg-dashboard-zec-price-v1";
+const ZEC_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /* ===== Sort Modes ===== */
 const sortModes = [
@@ -43,6 +50,9 @@ const sortModes = [
 /* ===== XLSX Source ===== */
 const XLSX_URL =
   "https://docs.google.com/spreadsheets/d/1FQ28rDCyRW0TiNxrm3rgD8ai2KGUsXAjPieQmI1kKKg/export?format=xlsx";
+
+const ZEC_PRICE_URL =
+  "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=90";
 
 const SHEETS = {
   DASHBOARD_ZCG: "ZCG Dashboard",
@@ -173,16 +183,28 @@ function fmtDateCell(v) {
 }
 
 /* ===== Workbook Loader ===== */
-async function loadWorkbook() {
-  if (workbook) return workbook;
+async function loadWorkbook({ force = false } = {}) {
+  if (!force && workbook) return workbook;
+  if (!force && workbookPromise) return workbookPromise;
 
-  const res = await fetch(XLSX_URL, { cache: "default" });
-  if (!res.ok) throw new Error("Failed to download XLSX");
+  workbookPromise = (async () => {
+    const res = await fetch(XLSX_URL, { cache: "default" });
+    if (!res.ok) throw new Error("Failed to download XLSX");
 
-  const buf = await res.arrayBuffer();
-  workbook = XLSX.read(buf, { type: "array" });
+    const buf = await res.arrayBuffer();
 
-  return workbook;
+    parsedSheetCache.aoa.clear();
+    parsedSheetCache.objects.clear();
+
+    workbook = XLSX.read(buf, { type: "array" });
+    return workbook;
+  })();
+
+  try {
+    return await workbookPromise;
+  } finally {
+    workbookPromise = null;
+  }
 }
 
 /* ===== Sheet Helpers ===== */
@@ -248,13 +270,13 @@ function serializeAppDataForCache(data) {
       lastUpdateTime: data.lastUpdateTime
         ? data.lastUpdateTime.toISOString()
         : null,
-      grants: data.grants.map((g) => ({
+      grants: (data.grants || []).map((g) => ({
         ...g,
         submissionDate: g.submissionDate
           ? g.submissionDate.toISOString()
           : null,
         lastPaidDate: g.lastPaidDate ? g.lastPaidDate.toISOString() : null,
-        milestones: g.milestones.map((m) => ({
+        milestones: (g.milestones || []).map((m) => ({
           ...m,
           dueDate: m.dueDate && toDate(m.dueDate)
             ? toDate(m.dueDate).toISOString()
@@ -267,7 +289,7 @@ function serializeAppDataForCache(data) {
             : m.estimate || null,
         })),
       })),
-      approvedAllRaw: data.approvedAllRaw.map((r) => ({
+      approvedAllRaw: (data.approvedAllRaw || []).map((r) => ({
         ...r,
         date: r.date ? new Date(r.date).toISOString() : null,
       })),
@@ -321,6 +343,36 @@ function saveCachedAppData(data) {
     localStorage.setItem(LOCAL_CACHE_KEY, serializeAppDataForCache(data));
   } catch (err) {
     console.warn("Failed to write local app cache:", err);
+  }
+}
+
+function loadTimedJsonCache(key, ttlMs) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.timestamp) return null;
+    if (Date.now() - parsed.timestamp > ttlMs) return null;
+
+    return parsed.data ?? null;
+  } catch (err) {
+    console.warn(`Failed to read cache for ${key}:`, err);
+    return null;
+  }
+}
+
+function saveTimedJsonCache(key, data) {
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        timestamp: Date.now(),
+        data,
+      })
+    );
+  } catch (err) {
+    console.warn(`Failed to write cache for ${key}:`, err);
   }
 }
 
@@ -926,8 +978,8 @@ function buildPaymentsData(aoaFunds) {
 }
 
 /* ===== App Data Boot ===== */
-async function buildAppData() {
-  await loadWorkbook();
+async function buildAppData(options = {}) {
+  await loadWorkbook(options);
 
   const dashboardRows = sheetToAoA(SHEETS.DASHBOARD_ZCG, { blankrows: true });
   const grantsRows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
@@ -978,39 +1030,65 @@ async function buildAppData() {
   };
 }
 
-async function ensureAppData() {
-  if (appData) return appData;
+async function ensureAppData({ force = false } = {}) {
+  if (!force && appData) return appData;
+  if (!force && appDataPromise) return appDataPromise;
 
-  const cached = loadCachedAppData();
-  if (cached) {
-    appData = cached;
-    allGrants = appData.grants || [];
-    lastUpdateTime = appData.lastUpdateTime || null;
-    updateLastUpdateTime();
-
-    // Refresh in background
-    buildAppData()
-      .then((fresh) => {
-        appData = fresh;
-        allGrants = fresh.grants || [];
-        lastUpdateTime = fresh.lastUpdateTime || null;
-        updateLastUpdateTime();
-        saveCachedAppData(fresh);
-      })
-      .catch((err) => {
-        console.warn("Background refresh failed:", err);
-      });
-
-    return appData;
+  if (!force) {
+    const cached = loadCachedAppData();
+    if (cached) {
+      appData = cached;
+      allGrants = appData.grants || [];
+      lastUpdateTime = appData.lastUpdateTime || null;
+      updateLastUpdateTime();
+      return appData;
+    }
   }
 
-  appData = await buildAppData();
-  allGrants = appData.grants || [];
-  lastUpdateTime = appData.lastUpdateTime || null;
-  updateLastUpdateTime();
-  saveCachedAppData(appData);
+  appDataPromise = (async () => {
+    try {
+      const fresh = await buildAppData({ force });
 
-  return appData;
+      appData = fresh;
+      allGrants = fresh.grants || [];
+      lastUpdateTime = fresh.lastUpdateTime || null;
+      updateLastUpdateTime();
+      saveCachedAppData(fresh);
+
+      return appData;
+    } finally {
+      appDataPromise = null;
+    }
+  })();
+
+  return appDataPromise;
+}
+
+async function getCachedZecPriceChart() {
+  const cached = loadTimedJsonCache(
+    ZEC_PRICE_CACHE_KEY,
+    ZEC_PRICE_CACHE_TTL_MS
+  );
+  if (cached) return cached;
+
+  if (zecPricePromise) return zecPricePromise;
+
+  zecPricePromise = (async () => {
+    const res = await fetch(ZEC_PRICE_URL, { cache: "default" });
+    if (!res.ok) {
+      throw new Error(`CoinGecko fetch failed: ${res.status}`);
+    }
+
+    const data = await res.json();
+    saveTimedJsonCache(ZEC_PRICE_CACHE_KEY, data);
+    return data;
+  })();
+
+  try {
+    return await zecPricePromise;
+  } finally {
+    zecPricePromise = null;
+  }
 }
 
 /* ===== Navigation ===== */
@@ -1755,10 +1833,7 @@ async function loadCategoryChart() {
 /* ===== ZEC Price Trend ===== */
 async function loadZecPriceTrend() {
   try {
-    const res = await fetch(
-      "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=90"
-    );
-    const data = await res.json();
+    const data = await getCachedZecPriceChart();
 
     const filtered = (data.prices || []).filter((_, i) => i % 24 === 0);
     const prices = filtered.map((p) => ({ date: new Date(p[0]), price: p[1] }));
@@ -3314,6 +3389,31 @@ async function loadNotetaker() {
   }
 }
 
+/* ===== Optional Manual Cache Controls ===== */
+function clearDashboardCaches() {
+  try {
+    localStorage.removeItem(LOCAL_CACHE_KEY);
+    localStorage.removeItem(ZEC_PRICE_CACHE_KEY);
+  } catch (err) {
+    console.warn("Failed clearing caches:", err);
+  }
+
+  workbook = null;
+  workbookPromise = null;
+  appData = null;
+  appDataPromise = null;
+  zecPricePromise = null;
+  allGrants = [];
+
+  parsedSheetCache.aoa.clear();
+  parsedSheetCache.objects.clear();
+}
+
+async function refreshDashboardData() {
+  clearDashboardCaches();
+  await ensureAppData({ force: true });
+}
+
 /* ===== Safety Check for marked library ===== */
 if (typeof marked === "undefined") {
   window.marked = { parse: (s) => s };
@@ -3337,13 +3437,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
-
-  // Warm app data early for faster subsequent tab loads
-  ensureAppData().catch((err) => {
-    console.warn("Initial app data preload failed:", err);
-  });
 });
 
 /* ===== Expose Functions to Window ===== */
 window.showGrantDetails = showGrantDetails;
 window.closeModal = closeModal;
+window.clearDashboardCaches = clearDashboardCaches;
+window.refreshDashboardData = refreshDashboardData;
