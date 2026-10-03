@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Zcash Community Grants Dashboard</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  
+  <!-- External Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+  
+  <!-- Our Files -->
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+      <div class="header-content">
+        <div class="logo">
+          <span class="logo-icon">⚡</span>
+          <span class="logo-text-full">Zcash Community Grants</span>
+          <span class="logo-text-short">ZCG</span>
+        </div>
+  
+        <nav class="nav-desktop">
+          <a class="nav-link active" data-page="dashboard">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+            <span>Dashboard</span>
+          </a>
+          <a class="nav-link" data-page="grants">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            <span>Grants</span>
+          </a>
+          <a class="nav-link" data-page="payments">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+              <line x1="1" y1="10" x2="23" y2="10"></line>
+            </svg>
+            <span>Payments</span>
+          </a>
+          <a class="nav-link" data-page="auditpayments">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span>Audit</span>
+          </a>
+          <a class="nav-link" data-page="liquidity">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+            <span>Liquidity</span>
+          </a>
+          <a class="nav-link" data-page="stipends">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="1" x2="12" y2="23"></line>
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+            <span>Stipends</span>
+          </a>
+          <a class="nav-link" data-page="notetaker">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            <span>Notetaker</span>
+          </a>
+        </nav>
+  
+        <div class="header-right">
+          <span class="last-updated" id="desktopUpdateTime">Loading...</span>
+          <button class="theme-toggle" id="themeToggle">🌙</button>
+        </div>
+      </div>
+    </header>
+  
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Dashboard Tab -->
+      <div id="dashboard" class="page active">
+        <div class="page-header">
+          <h2>ZCG Statistics</h2>
+          <p>Overview of Zcash Community Grants treasury and activity</p>
+        </div>
+        
+        <!-- Treasury Stats -->
+        <div class="section-title">Treasury</div>
+        <div class="stats-grid" id="usdMetrics">
+          <div class="stat-card loading-placeholder">Loading treasury metrics...</div>
+        </div>
+        
+        <!-- Grants Stats -->
+        <div class="section-title">Grants</div>
+        <div class="stats-grid" id="activityMetrics">
+          <div class="stat-card loading-placeholder">Loading grant metrics...</div>
+        </div>
+        
+        <!-- Charts -->
+        <div class="grid-2">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title">Payouts & Milestones/month</h3>
+              <div class="filter-tabs" id="timeFilters">
+                <button class="filter-tab" data-range="1m">1m</button>
+                <button class="filter-tab" data-range="3m">3m</button>
+                <button class="filter-tab" data-range="1y">1y</button>
+                <button class="filter-tab active" data-range="ytd">YTD</button>
+                <button class="filter-tab" data-range="max">Max</button>
+              </div>
+            </div>
+            <div class="chart-container">
+              <canvas id="payoutsChart"></canvas>
+            </div>
+          </div>
+          
+          <div class="chart-card">
+            <h3 class="chart-title">Grant Categories All Time</h3>
+            <div class="chart-container">
+              <canvas id="categoryChart"></canvas>
+            </div>
+          </div>
+          
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 class="chart-title" id="approvedTitle">Approved Grants/month</h3>
+              <div class="filter-tabs" id="approvedTimeFilters">
+                <button class="filter-tab" data-range="1m">1m</button>
+                <button class="filter-tab" data-range="3m">3m</button>
+                <button class="filter-tab" data-range="1y">1y</button>
+                <button class="filter-tab active" data-range="ytd">YTD</button>
+                <button class="filter-tab" data-range="max">Max</button>
+              </div>
+            </div>
+            <div class="chart-container">
+              <canvas id="approvedChart"></canvas>
+            </div>
+          </div>
+          
+          <div class="chart-card">
+            <h3 class="chart-title">ZEC Price (90d)</h3>
+            <div class="chart-container">
+              <canvas id="zecPriceChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Grants Tab -->
+      <div id="grants" class="page">
+        <div class="page-header">
+          <h2>Grants</h2>
+          <p>All approved grants and their status</p>
+        </div>
+        
+        <div class="grants-header">
+            <div class="filter-tabs" id="statusFilters">
+                <button class="filter-tab active" data-filter="all">All</button>
+                <button class="filter-tab" data-filter="completed">Completed</button>
+                <button class="filter-tab" data-filter="in-progress">In Progress</button>
+                <button class="filter-tab" data-filter="waiting">Waiting start</button>
+                <button class="filter-tab" data-filter="discussion">Discussion Required</button>
+                <button class="filter-tab" data-filter="declined">Declined</button>
+              </div>
+          
+          <div class="grants-controls">
+            <div class="filter-tabs" id="budgetFilters">
+              <button class="filter-tab active" data-budget="all">All Budget</button>
+              <button class="filter-tab" data-budget="small">&lt;50k</button>
+              <button class="filter-tab" data-budget="medium">50-200k</button>
+              <button class="filter-tab" data-budget="large">200k+</button>
+            </div>
+            
+            <button class="sort-btn" id="sortBtn">📅 Newest</button>
+            
+            <div class="view-toggle">
+              <button class="view-btn active" data-view="grid">⊞</button>
+              <button class="view-btn" data-view="list">☰</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="search-box">
+          <input type="text" id="desktopSearch" placeholder="Search grants, grantees...">
+        </div>
+        
+        <div class="grants-counter" id="grantsCounter">Loading...</div>
+        
+        <div class="filter-tabs" id="categoryFilters">
+          <button class="filter-tab active" data-cat="all">All Categories</button>
+        </div>
+        
+        <div class="grants-grid" id="grantsContainer">
+          <div class="loading-placeholder">Loading grants data...</div>
+        </div>
+      </div>
+  
+      <!-- Payments Tab -->
+      <div id="payments" class="page">
+        <div class="page-header">
+          <h2>Payments</h2>
+          <p>Grant payouts statistics</p>
+        </div>
+        
+<div class="chart-card">
+  <div class="chart-header">
+    <h3 class="chart-title" id="paidOutTitle">Total Paid Out</h3>
+
+    <div class="filter-tabs" id="paidOutFilters">
+      <button class="filter-tab active" data-range="all">All</button>
+      <button class="filter-tab" data-range="small">&lt;50k</button>
+      <button class="filter-tab" data-range="medium">50-200k</button>
+      <button class="filter-tab" data-range="large">200k+</button>
+    </div>
+  </div>
+          <div class="chart-container tall">
+            <canvas id="paidOutChart"></canvas>
+          </div>
+        </div>
+        
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Future Milestones</h3>
+            <div class="filter-tabs" id="futureFilters">
+              <button class="filter-tab active" data-range="all">All</button>
+              <button class="filter-tab" data-range="small">&lt;50k</button>
+              <button class="filter-tab" data-range="medium">50-200k</button>
+              <button class="filter-tab" data-range="large">200k+</button>
+            </div>
+          </div>
+          <div class="chart-container tall">
+            <canvas id="futureMilestonesChart"></canvas>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Audit Payments Tab -->
+      <div id="auditpayments" class="page">
+        <div class="page-header">
+          <h2>Audit Payments</h2>
+          <p>Independent contractor payments</p>
+        </div>
+        <div class="content-card">
+          <div id="icPayoutsContent">
+            <div class="loading-placeholder">Loading IC payouts data...</div>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Maya Liquidity Tab -->
+      <div id="liquidity" class="page">
+        <div class="page-header">
+          <h2>Maya Liquidity</h2>
+          <p>ZEC liquidity on Maya DEX</p>
+        </div>
+        <div class="content-card">
+          <div id="liquidityContent">
+            <div class="loading-placeholder">Loading liquidity data...</div>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Stipends Tab -->
+      <div id="stipends" class="page">
+        <div class="page-header">
+          <h2>Stipends</h2>
+          <p>Monthly stipend payments</p>
+        </div>
+        <div class="content-card">
+          <div id="stipendsContent">
+            <div class="loading-placeholder">Loading stipends data...</div>
+          </div>
+        </div>
+      </div>
+  
+      <!-- Notetaker Tab -->
+      <div id="notetaker" class="page">
+        <div class="page-header">
+          <h2>Notetaker Payments</h2>
+          <p>Arborist call meeting notes payments</p>
+        </div>
+        <div class="content-card">
+          <div id="notetakerContent">
+            <div class="loading-placeholder">Loading notetaker payments...</div>
+          </div>
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+        <div class="site-footer-inner">
+          <span>Data source:</span>
+          <a
+            id="sheetSourceLink"
+            href="https://docs.google.com/spreadsheets/d/1FQ28rDCyRW0TiNxrm3rgD8ai2KGUsXAjPieQmI1kKKg/edit?usp=sharing"
+            target="_blank"
+            rel="noopener"
+          >
+            ZCG Google Sheets
+          </a>
+        </div>
+      </footer>
+    <!-- Bottom Navigation (Mobile) -->
+    <nav class="bottom-nav">
+      <div class="bottom-nav-content">
+        <button class="bottom-nav-link active" data-page="dashboard">
+          <span class="bottom-nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+          </span>
+          <span>Home</span>
+        </button>
+        <button class="bottom-nav-link" data-page="grants">
+          <span class="bottom-nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+          </span>
+          <span>Grants</span>
+        </button>
+        <button class="bottom-nav-link" data-page="payments">
+          <span class="bottom-nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+              <line x1="1" y1="10" x2="23" y2="10"></line>
+            </svg>
+          </span>
+          <span>Payments</span>
+        </button>
+        <button class="bottom-nav-link" data-page="liquidity">
+          <span class="bottom-nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+          </span>
+          <span>Liquidity</span>
+        </button>
+        <button class="bottom-nav-link" data-page="stipends">
+          <span class="bottom-nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="1" x2="12" y2="23"></line>
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+          </span>
+          <span>Stipends</span>
+        </button>
+      </div>
+    </nav>
+  
+    <!-- Grant Details Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title-row">
+            <h3 class="modal-title">Grant Details</h3>
+            <button class="modal-close" onclick="closeModal()">×</button>
+          </div>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+      </div>
+    </div>
+  </body>
