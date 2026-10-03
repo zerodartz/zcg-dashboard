@@ -1,3446 +1,2799 @@
-/* ===== ZCG Dashboard — Optimized Complete Edition ===== */
+"use strict";
 
-/* ===== Global Variables ===== */
-let workbook = null;
-let workbookPromise = null;
+/* ========================================================================
+ * Configuration
+ * ===================================================================== */
+const SHEET_ID = "1FQ28rDCyRW0TiNxrm3rgD8ai2KGUsXAjPieQmI1kKKg";
+const XLSX_URL =
+  `https://docs.google.com/spreadsheets/d/${SHEET_ID}` +
+  "/export?format=xlsx";
+const EVENTS_URL =
+  "https://docs.google.com/spreadsheets/d/e/" +
+  "2PACX-1vQILY1iDrb0KsT4w0IvfoWV6g3rsoCgFyjT4ZEzXspYqRjUUQpQ2DaXyK38HbZYFiSDJxAfYZ_9q8SX" +
+  "/pub?output=xlsx";
+const XLSX_LIBRARY =
+  "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+const PRICE_URL =
+  "https://api.coingecko.com/api/v3/coins/zcash/market_chart" +
+  "?vs_currency=usd&days=90";
 
-let allGrants = [];
-let filteredGrants = [];
-let currentPayoutData = [];
-let currentTimeFilter = "ytd";
-let currentSortMode = 0;
-let lastUpdateTime = null;
-let updateTimeTimeout = null;
-let currentStatusFilter = "all";
-let currentBudgetFilter = "all";
-let currentCategoryFilter = "all";
-let currentPaidOutAmountFilter = "all";
-let currentApprovedTimeFilter = "ytd";
-let loadedTabs = new Set();
-let pendingGrantToOpen = null;
+/* Maya liquidity */
+const MAYA_ADDRESS = "maya14n4r0uwpp96435llrum2mevsevk5ph0lq0rjem";
+const MAYA_POOL = "ZEC.ZEC";
+const MIDGARD = "https://midgard.mayachain.info/v2";
+const ASSET_DECIMALS = 1e8;
+const CACAO_DECIMALS = 1e10; // If CACAO amounts look 100x off, change this.
+const MAYA_KEY = "zcg-maya-v2";
+const MAYA_TTL = 6 * 60 * 60 * 1000;
+const ENTRY_ZEC = 2580.34; // Initial LP deposit: worth exactly $100,000
+const ENTRY_USD = 100000;
 
-// GitHub cache
-const githubIssueCache = {};
-
-// App-level cache
-const parsedSheetCache = {
-  aoa: new Map(),
-  objects: new Map(),
+const EVENTS_KEY = "zcg-events-v1";
+const CACHE_TTL = 60 * 60 * 1000;
+const PRICE_KEY = "zcg-price-v3";
+const DAY = 86400000;
+const DAILY_INFLOW_ZEC = 144;
+const MINI_COUNT = 5;
+const CACHE_KEY = "zcg-dashboard-v10";
+const MIN_MONTH = "2021-01"; // no data before this
+const recipientView = { range: "all", size: "all" };
+const chartRanges = { payout: "12m", approval: "12m" };
+const statusLabels = {
+  completed: "Completed",
+  "in-progress": "In progress",
+  waiting: "In review",
+  discussion: "Discussion required",
+  rejected: "Declined",
 };
 
-let appData = null;
-let appDataPromise = null;
-let zecPricePromise = null;
+const sheets = {
+  dashboard: "ZCG Dashboard",
+  grants: "ZCG Grants",
+  tracking: "ZCG All Grants Tracking",
+  funds: "ZCG Funds Distribution",
+  liquidity: "ZCG Liquidity",
+  stipends: "ZCG 2026 Stipend",
+  contractors: "ZCG IC Payouts",
+  discbudget: "ZCG 2026 Disc. Budget",
+};
 
-/* ===== Local Cache ===== */
-const LOCAL_CACHE_KEY = "zcg-dashboard-appdata-v3";
-const LOCAL_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-const ZEC_PRICE_CACHE_KEY = "zcg-dashboard-zec-price-v1";
-const ZEC_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-/* ===== Sort Modes ===== */
-const sortModes = [
-  { key: "newest", icon: "📅", text: "Newest" },
-  { key: "oldest", icon: "📅", text: "Oldest" },
-  { key: "biggest", icon: "💰", text: "Biggest" },
-  { key: "smallest", icon: "💰", text: "Smallest" },
+const SECURITY_SHEET = new RegExp(
+  sheets.discbudget.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  "i"
+);
+const SECURITY_TEXT = /audit|security|bounty|pentest|vulnerab/i;
+const NOTES_TEXT = /meeting notes/i;
+const MONTH_NAMES = [
+  "jan", "feb", "mar", "apr", "may", "jun",
+  "jul", "aug", "sep", "oct", "nov", "dec",
 ];
 
-/* ===== XLSX Source ===== */
-const XLSX_URL =
-  "https://docs.google.com/spreadsheets/d/1FQ28rDCyRW0TiNxrm3rgD8ai2KGUsXAjPieQmI1kKKg/export?format=xlsx";
+/* ========================================================================
+ * State & helpers
+ * ===================================================================== */
+let data = null;
+let events = null;
+let refreshing = null;
+let eventsPromise = null;
+let libraryPromise = null;
+let activePage = "dashboard";
+let modalRequest = 0;
+let mayaLoading = false;
+let pricePromise = null;
+const charts = new Map();
+const tableStates = new Map();
+const renderedPages = new Set();
+const recipientSort = { key: "total", dir: -1 };
 
-const ZEC_PRICE_URL =
-  "https://api.coingecko.com/api/v3/coins/zcash/market_chart?vs_currency=usd&days=90";
-
-const SHEETS = {
-  DASHBOARD_ZCG: "ZCG Dashboard",
-  DASHBOARD_LOCKBOX: "Lockbox Dashboard",
-  GRANTS_ZCG: "ZCG Grants",
-  GRANTS_LOCKBOX: "Lockbox Grants",
-  FUNDS: "ZCG Funds Distribution",
-  LIQUIDITY: "ZCG Liquidity",
-  STIPENDS: "ZCG 2026 Stipend",
-  IC_PAYOUTS: "ZCG IC Payouts",
-  BUDGET_2025: "ZCG 2026 Disc. Budget",
-  ALL_GRANTS: "ZCG All Grants Tracking",
-};
-
-/* ===== Tab Routes ===== */
-const tabRoutes = {
-  dashboard: { id: "dashboard", load: loadOverview },
-  grants: { id: "grants", load: loadGrants },
-  payments: { id: "payments", load: loadPayouts },
-  auditpayments: { id: "auditpayments", load: loadICPayouts },
-  liquidity: { id: "liquidity", load: loadLiquidity },
-  stipends: { id: "stipends", load: loadStipends },
-  notetaker: { id: "notetaker", load: loadNotetaker },
-};
-
-/* ===== Utility Functions ===== */
-const cleanNumber = (val) =>
-  parseFloat((val ?? "0").toString().replace(/[$,%\s,]/g, "")) || 0;
-
-const formatUSD = (num) =>
-  "$" +
-  Number(num).toLocaleString(undefined, {
-    minimumFractionDigits: 0,
+const $ = (id) => document.getElementById(id);
+const escapeHTML = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      })[char],
+  );
+const number = (value) =>
+  Number.parseFloat(String(value ?? "").replace(/[$,%\s,]/g, "")) || 0;
+const usd = (value) =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
     maximumFractionDigits: 0,
-  });
-
-const formatZEC = (num) =>
-  Number(num).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
+  }).format(value);
+const zec = (value) =>
+  `${Number(value).toLocaleString(undefined, {
     maximumFractionDigits: 2,
-  }) + " ZEC";
-
-function formatZecPrice(num) {
-  const n = Number(cleanNumber(num)) || 0;
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function normKey(s) {
-  return (s || "")
-    .toString()
-    .replace(/\u00A0/g, " ")
+  })} ZEC`;
+const norm = (value) =>
+  String(value ?? "")
+    .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
-}
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function getCurrentYear() {
-  return new Date().getFullYear();
-}
-
-function debounce(fn, delay = 150) {
-  let t = null;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), delay);
-  };
-}
-
-/* ===== Date Coercion ===== */
-const dateCache = new Map();
-
-function toDate(v) {
-  if (v instanceof Date && !isNaN(v)) return v;
-  if (v === null || v === undefined || v === "") return null;
-
-  const key = typeof v === "string" || typeof v === "number" ? String(v) : null;
-  if (key && dateCache.has(key)) return dateCache.get(key);
-
-  let result = null;
-
-  if (typeof v === "number") {
-    const d = XLSX.SSF.parse_date_code(v);
-    if (d) {
-      result = new Date(
-        Date.UTC(d.y, d.m - 1, d.d, d.H || 0, d.M || 0, d.S || 0)
-      );
-    }
-  } else if (typeof v === "string") {
-    const s = v.trim();
-    if (s) {
-      const dt = new Date(s);
-      if (!isNaN(dt)) {
-        result = dt;
-      } else {
-        const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-        if (m) {
-          const mm = parseInt(m[1], 10);
-          const dd = parseInt(m[2], 10);
-          const yy = parseInt(m[3], 10);
-          const yyyy = yy < 100 ? 2000 + yy : yy;
-          const d2 = new Date(yyyy, mm - 1, dd);
-          if (!isNaN(d2)) result = d2;
-        }
-      }
-    }
+function date(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) return Number.isNaN(+value) ? null : value;
+  if (typeof value === "number") {
+    const parsed = window.XLSX?.SSF.parse_date_code(value);
+    return parsed
+      ? new Date(
+          parsed.y,
+          parsed.m - 1,
+          parsed.d,
+          parsed.H || 0,
+          parsed.M || 0,
+          parsed.S || 0,
+        )
+      : null;
   }
-
-  if (key) dateCache.set(key, result);
-  return result;
+  const result = new Date(value);
+  return Number.isNaN(+result) ? null : result;
 }
 
-function fmtDateCell(v) {
-  const d = toDate(v);
-  if (!d || isNaN(d)) return "";
-  return d.toLocaleDateString();
-}
+const iso = (value) => date(value)?.toISOString() || null;
+const fmtDate = (value) => date(value)?.toLocaleDateString() || "—";
+const monthKey = (value) => {
+  const d = date(value);
+  return d
+    ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+    : "";
+};
 
-/* ===== Workbook Loader ===== */
-async function loadWorkbook({ force = false } = {}) {
-  if (!force && workbook) return workbook;
-  if (!force && workbookPromise) return workbookPromise;
+/* Returns every dated Disc. Budget payment. `match` marks the rows that
+ * look like security spending (bounties, audits) for the Security page. */
+function parseBudgetSheet(workbook) {
+  console.group("🔍 Debug: Disc. Budget & Security Audit");
+  console.log("All workbook sheet names:", workbook.SheetNames);
+  console.log("Using SECURITY_SHEET regex:", SECURITY_SHEET);
 
-  workbookPromise = (async () => {
-    const res = await fetch(XLSX_URL, { cache: "default" });
-    if (!res.ok) throw new Error("Failed to download XLSX");
-
-    const buf = await res.arrayBuffer();
-
-    parsedSheetCache.aoa.clear();
-    parsedSheetCache.objects.clear();
-
-    workbook = XLSX.read(buf, { type: "array" });
-    return workbook;
-  })();
-
-  try {
-    return await workbookPromise;
-  } finally {
-    workbookPromise = null;
+  const name = workbook.SheetNames.find((n) => SECURITY_SHEET.test(n));
+  if (!name) {
+    console.warn("❌ Disc. budget sheet NOT found matching regex! Available tabs:", workbook.SheetNames);
+    console.groupEnd();
+    return [];
   }
-}
+  console.log("✅ Matched Disc. budget sheet:", name);
 
-/* ===== Sheet Helpers ===== */
-function sheetToAoA(name, opts = {}) {
-  const cacheKey = `${name}::aoa::${JSON.stringify(opts)}`;
-  if (parsedSheetCache.aoa.has(cacheKey)) {
-    return parsedSheetCache.aoa.get(cacheKey);
-  }
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
+    header: 1,
+    raw: true,
+    blankrows: true,
+    defval: "",
+  });
+  console.log(`Loaded ${rows.length} total raw rows from sheet.`);
 
-  const ws = workbook?.Sheets?.[name];
-  const value = ws
-    ? XLSX.utils.sheet_to_json(ws, {
-        header: 1,
-        blankrows: false,
-        raw: true,
-        ...opts,
-      })
-    : [];
+  const headerIndex = rows.findIndex((row) => {
+    const cells = row.map(norm);
+    return (
+      cells.some((c) => /^date|^paid/.test(c)) &&
+      cells.some((c) => /usd/.test(c)) &&
+      cells.some((c) => /recipient|payee|contractor|name/.test(c))
+    );
+  });
 
-  parsedSheetCache.aoa.set(cacheKey, value);
-  return value;
-}
-
-function sheetToObjects(name, headerRowIndex = 0, opts = {}) {
-  const cacheKey = `${name}::obj::${headerRowIndex}::${JSON.stringify(opts)}`;
-  if (parsedSheetCache.objects.has(cacheKey)) {
-    return parsedSheetCache.objects.get(cacheKey);
-  }
-
-  const aoa = sheetToAoA(name, opts);
-  if (!aoa.length) {
-    parsedSheetCache.objects.set(cacheKey, []);
+  if (headerIndex < 0) {
+    console.warn("❌ Header row not recognized! Inspecting first 10 rows:", rows.slice(0, 10));
+    console.groupEnd();
     return [];
   }
 
-  const headers = (aoa[headerRowIndex] || []).map((h) =>
-    (h || "").toString().replace(/\u00A0/g, " ").trim()
-  );
+  const headers = rows[headerIndex].map(norm);
+  console.log(`✅ Header detected at row index ${headerIndex}:`, headers);
 
-  const rows = aoa
-    .slice(headerRowIndex + 1)
-    .filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
+  const find = (pattern, exclude) =>
+    headers.findIndex((h) => pattern.test(h) && !(exclude && exclude.test(h)));
 
-  const objs = rows.map((r) => {
-    const o = {};
-    headers.forEach((h, i) => {
-      if (!h) return;
-      o[h] = r[i];
-    });
-    return o;
-  });
-
-  parsedSheetCache.objects.set(cacheKey, objs);
-  return objs;
-}
-
-/* ===== Local Cache Helpers ===== */
-function serializeAppDataForCache(data) {
-  return JSON.stringify({
-    timestamp: Date.now(),
-    data: {
-      ...data,
-      lastUpdateTime: data.lastUpdateTime
-        ? data.lastUpdateTime.toISOString()
-        : null,
-      grants: (data.grants || []).map((g) => ({
-        ...g,
-        submissionDate: g.submissionDate
-          ? g.submissionDate.toISOString()
-          : null,
-        lastPaidDate: g.lastPaidDate ? g.lastPaidDate.toISOString() : null,
-        milestones: (g.milestones || []).map((m) => ({
-          ...m,
-          dueDate: m.dueDate && toDate(m.dueDate)
-            ? toDate(m.dueDate).toISOString()
-            : m.dueDate || null,
-          paidDate: m.paidDate && toDate(m.paidDate)
-            ? toDate(m.paidDate).toISOString()
-            : m.paidDate || null,
-          estimate: m.estimate && toDate(m.estimate)
-            ? toDate(m.estimate).toISOString()
-            : m.estimate || null,
-        })),
-      })),
-      approvedAllRaw: (data.approvedAllRaw || []).map((r) => ({
-        ...r,
-        date: r.date ? new Date(r.date).toISOString() : null,
-      })),
-    },
-  });
-}
-
-function hydrateAppDataFromCache(payload) {
-  if (!payload?.data) return null;
-  const d = payload.data;
-
-  return {
-    ...d,
-    lastUpdateTime: d.lastUpdateTime ? new Date(d.lastUpdateTime) : null,
-    grants: (d.grants || []).map((g) => ({
-      ...g,
-      submissionDate: g.submissionDate ? new Date(g.submissionDate) : null,
-      lastPaidDate: g.lastPaidDate ? new Date(g.lastPaidDate) : null,
-      milestones: (g.milestones || []).map((m) => ({
-        ...m,
-        dueDate: m.dueDate ? new Date(m.dueDate) : null,
-        paidDate: m.paidDate ? new Date(m.paidDate) : null,
-        estimate: m.estimate ? new Date(m.estimate) : null,
-      })),
-    })),
-    approvedAllRaw: (d.approvedAllRaw || []).map((r) => ({
-      ...r,
-      date: r.date ? new Date(r.date) : null,
-    })),
-  };
-}
-
-function loadCachedAppData() {
-  try {
-    const raw = localStorage.getItem(LOCAL_CACHE_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-    if (!parsed?.timestamp || !parsed?.data) return null;
-    if (Date.now() - parsed.timestamp > LOCAL_CACHE_TTL_MS) return null;
-
-    return hydrateAppDataFromCache(parsed);
-  } catch (err) {
-    console.warn("Failed to read local app cache:", err);
-    return null;
-  }
-}
-
-function saveCachedAppData(data) {
-  try {
-    localStorage.setItem(LOCAL_CACHE_KEY, serializeAppDataForCache(data));
-  } catch (err) {
-    console.warn("Failed to write local app cache:", err);
-  }
-}
-
-function loadTimedJsonCache(key, ttlMs) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-    if (!parsed?.timestamp) return null;
-    if (Date.now() - parsed.timestamp > ttlMs) return null;
-
-    return parsed.data ?? null;
-  } catch (err) {
-    console.warn(`Failed to read cache for ${key}:`, err);
-    return null;
-  }
-}
-
-function saveTimedJsonCache(key, data) {
-  try {
-    localStorage.setItem(
-      key,
-      JSON.stringify({
-        timestamp: Date.now(),
-        data,
-      })
-    );
-  } catch (err) {
-    console.warn(`Failed to write cache for ${key}:`, err);
-  }
-}
-
-/* ===== Status Helpers ===== */
-function getDecisionStatus(rawDecision) {
-  const s = (rawDecision || "")
-    .toString()
-    .replace(/\u00A0/g, " ")
-    .trim()
-    .toLowerCase();
-
-  if (!s) return "unknown";
-
-  if (s.includes("approved")) return "approved";
-  if (s.includes("reject") || s.includes("decline")) return "rejected";
-  if (s.includes("withdraw")) return "withdrawn";
-  if (s.includes("filter")) return "filtered";
-  if (
-    s.includes("discussion") ||
-    s.includes("discuss") ||
-    s.includes("zcg to discuss")
-  ) {
-    return "discussion";
-  }
-  if (s.includes("cancel")) return "cancelled";
-
-  return "unknown";
-}
-
-function getOperationalStatusFromMilestones(milestones) {
-  const completedMilestones = milestones.filter((m) => !!m.paidDate).length;
-  const totalMilestones = milestones.length;
-
-  let status = "waiting";
-  if (completedMilestones === totalMilestones && totalMilestones > 0) {
-    status = "completed";
-  } else if (completedMilestones > 0) {
-    status = "in-progress";
-  }
-
-  return {
-    status,
-    completedMilestones,
-    totalMilestones,
-  };
-}
-
-/* ===== Data Builders ===== */
-function buildProjectMetaFromAllGrants(allAoA) {
-  const meta = {};
-  if (!allAoA.length) return meta;
-
-  const headers = (allAoA[0] || []).map((h) =>
-    (h || "").toString().replace(/\u00A0/g, " ").trim()
-  );
-  const normHeaders = headers.map((h) => h.toLowerCase().replace(/\s+/g, " "));
-
-  const COL_DATE = 0;
-  const COL_TITLE = 1;
-  const COL_DECISION = 5;
-  const forumIdx = normHeaders.findIndex(
-    (h) => h.includes("forum") && h.includes("link")
-  );
-
-  for (let i = 1; i < allAoA.length; i++) {
-    const row = allAoA[i] || [];
-    const rawTitle = (row[COL_TITLE] || "").toString().trim();
-    if (!rawTitle) continue;
-
-    const d = toDate(row[COL_DATE]);
-    const decisionRaw = row[COL_DECISION];
-    const forumLink =
-      forumIdx >= 0 ? (row[forumIdx] || "").toString().trim() : "";
-
-    const key = normKey(rawTitle);
-    const existing = meta[key] || {};
-
-    const submissionDate =
-      existing.submissionDate && d
-        ? d < existing.submissionDate
-          ? d
-          : existing.submissionDate
-        : d || existing.submissionDate || null;
-
-    const decisionStatus = getDecisionStatus(
-      decisionRaw != null ? decisionRaw : existing.decisionRaw
-    );
-
-    meta[key] = {
-      submissionDate,
-      decisionStatus,
-      forumLink: forumLink || existing.forumLink || null,
-    };
-  }
-
-  return meta;
-}
-
-function buildUnifiedGrants(grantsRows, allGrantsAoA) {
-  const projectMeta = buildProjectMetaFromAllGrants(allGrantsAoA);
-
-  const grantsHeaderAoa = sheetToAoA(SHEETS.GRANTS_ZCG);
-  const headers = (grantsHeaderAoa[0] || []).map((h) =>
-    (h || "").toString().replace(/\u00A0/g, " ").trim()
-  );
-  const headerNorm = headers.map((h) => h.replace(/\s+/g, " ").toLowerCase());
-  const idxCategory = headerNorm.indexOf("category (as determined by zcg)");
-  const categoryHeader =
-    idxCategory >= 0 ? headers[idxCategory] : "Category (as determined by ZCG)";
-
-  const projectMap = {};
-
-  // Pass 1: approved/active grants from ZCG Grants
-  grantsRows.forEach((row) => {
-    const project = (row["Project"] || "").toString().trim();
-    const grantee =
-      (
-        row["Grantee"] ||
-        row["Applicant(s)"] ||
-        row["Applicant"] ||
-        row["Recipient"] ||
-        ""
-      )
-        .toString()
-        .trim();
-
-    if (!project || !grantee) return;
-
-    const key = `${project}_${grantee}`;
-    const meta = projectMeta[normKey(project)] || {};
-
-    if (!projectMap[key]) {
-      projectMap[key] = {
-        project,
-        grantee,
-        totalAmount: 0,
-        paidAmount: 0,
-        milestones: [],
-        lastPaidDate: null,
-        category: "",
-        submissionDate: meta.submissionDate || null,
-        decisionStatus: meta.decisionStatus || "approved",
-        forumLink: meta.forumLink || null,
-      };
-    }
-
-    const cat = (row[categoryHeader] || "")
-      .toString()
-      .replace(/\u00A0/g, " ")
-      .trim();
-    if (cat && !projectMap[key].category) {
-      projectMap[key].category = cat;
-    }
-
-    const amount = cleanNumber(row["Amount (USD)"]);
-    projectMap[key].totalAmount += amount;
-
-    const paidDate = toDate(row["Paid Out"]);
-    if (paidDate) {
-      projectMap[key].paidAmount += amount;
-      if (!projectMap[key].lastPaidDate || paidDate > projectMap[key].lastPaidDate) {
-        projectMap[key].lastPaidDate = paidDate;
-      }
-    }
-
-    projectMap[key].milestones.push({
-      amount,
-      dueDate: toDate(row["Milestone Due Date"]),
-      paidDate,
-      estimate: toDate(row["Estimate"]),
-    });
-  });
-
-  // Pass 2: add discussion/rejected proposals from ALL_GRANTS
-  for (let i = 1; i < allGrantsAoA.length; i++) {
-    const row = allGrantsAoA[i] || [];
-    const project = (row[1] || "").toString().trim();
-    const grantee = (row[2] || "").toString().trim();
-    const decisionStatus = getDecisionStatus(row[5]);
-
-    if (!project || !grantee) continue;
-    if (decisionStatus !== "rejected" && decisionStatus !== "discussion") {
-      continue;
-    }
-
-    const key = `${project}_${grantee}`;
-    if (projectMap[key]) {
-      if (
-        projectMap[key].decisionStatus === "unknown" ||
-        projectMap[key].decisionStatus === "approved"
-      ) {
-        projectMap[key].decisionStatus = decisionStatus;
-      }
-      continue;
-    }
-
-    const meta = projectMeta[normKey(project)] || {};
-
-    projectMap[key] = {
-      project,
-      grantee,
-      totalAmount: 0,
-      paidAmount: 0,
-      milestones: [],
-      lastPaidDate: null,
-      category: "",
-      submissionDate: meta.submissionDate || toDate(row[0]),
-      decisionStatus,
-      forumLink: meta.forumLink || null,
-    };
-  }
-
-  return Object.values(projectMap)
-    .filter(
-      (grant) =>
-        grant.decisionStatus !== "cancelled" &&
-        grant.decisionStatus !== "withdrawn"
-    )
-    .map((grant) => {
-      const operational = getOperationalStatusFromMilestones(grant.milestones);
-      return {
-        ...grant,
-        ...operational,
-        category: grant.category || "",
-        submissionDate: grant.submissionDate || null,
-        decisionStatus: grant.decisionStatus || "unknown",
-        forumLink: grant.forumLink || null,
-      };
-    });
-}
-
-function buildProjectTotalsFromGrants(grantsRows) {
-  const totals = {};
-  grantsRows.forEach((r) => {
-    const project = (r["Project"] || "").toString();
-    const key = normKey(project);
-    if (!key) return;
-    totals[key] = (totals[key] || 0) + cleanNumber(r["Amount (USD)"]);
-  });
-  return totals;
-}
-
-function computeGrantStatsFromRows(grantRows) {
-  const year = getCurrentYear();
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const twelveMonthsAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-
-  const getKey = (r) => {
-    const project = (r["Project"] || "").toString().trim();
-    const grantee = (
-      r["Grantee"] ||
-      r["Applicant(s)"] ||
-      r["Applicant"] ||
-      r["Recipient"] ||
-      ""
-    )
-      .toString()
-      .trim();
-    return project && grantee ? `${project}__${grantee}` : "";
+  const c = {
+    date: find(/^date|^paid/),
+    recipient: find(/recipient|payee|contractor|^name/),
+    desc: find(/description|purpose|item|memo|notes?|project|title/),
+    rate: find(/zec\s*\/\s*usd|rate|price/),
+    usd: find(/usd/, /\/|rate|price/),
+    zec: find(/^zec/, /\/|rate|price|usd/),
   };
 
-  const getApprovedDate = (r) =>
-    toDate(
-      r["Date Committee Approved/ Rejected"] ||
-        r["Date Committee Approved/Rejected"] ||
-        r["Approved Date"] ||
-        r["Date"]
-    );
+  console.log("Column index mapping:", c);
 
-  const getPaidDate = (r) => toDate(r["Paid Out"]);
-  const getAmountUSD = (r) => cleanNumber(r["Amount (USD)"]);
-  const getZecDisbursed = (r) => cleanNumber(r["ZEC Disbursed"] || r["ZEC"] || 0);
+  const out = [];
+  let skippedNoDate = 0;
+  let skippedNoUsd = 0;
 
-  const projectMap = new Map();
+  rows.slice(headerIndex + 1).forEach((row, i) => {
+    // Skip empty lines
+    if (!row.some((cell) => cell !== "" && cell != null)) return;
 
-  let payout30dUSD = 0;
-  let payout30dZEC = 0;
-  let payout12mUSD = 0;
-  let payout12mZEC = 0;
-  let newLiabilities12m = 0;
+    const text = row.join(" ");
+    const description = String((c.desc >= 0 ? row[c.desc] : "") || text).trim();
+    const zecAmount = c.zec >= 0 ? number(row[c.zec]) : 0;
+    const rate = c.rate >= 0 ? number(row[c.rate]) : 0;
+    const parsedDate = c.date >= 0 ? iso(row[c.date]) : null;
+    const rawUsd = c.usd >= 0 ? number(row[c.usd]) : 0;
+    const computedUsd = rawUsd || zecAmount * rate;
+    const matchesSecurity = SECURITY_TEXT.test(text);
 
-  grantRows.forEach((r) => {
-    const key = getKey(r);
-    if (!key) return;
-
-    if (!projectMap.has(key)) {
-      projectMap.set(key, {
-        project: (r["Project"] || "").toString().trim(),
-        grantee: (
-          r["Grantee"] ||
-          r["Applicant(s)"] ||
-          r["Applicant"] ||
-          r["Recipient"] ||
-          ""
-        )
-          .toString()
-          .trim(),
-        milestones: [],
-        approvedDates: [],
-        totalBudget: 0,
+    // If it mentions bounty/security, log it immediately so you can see its values!
+    if (/bount|audit|secur/i.test(text)) {
+      console.log(`🎯 Found security candidate row #${i + headerIndex + 1}:`, {
+        rawDate: row[c.date],
+        parsedDate,
+        description,
+        recipient: row[c.recipient],
+        usd: computedUsd,
+        matchesSecurityText: matchesSecurity,
+        fullRow: row,
       });
     }
 
-    const rec = projectMap.get(key);
-    const paidDate = getPaidDate(r);
-    const amtUsd = getAmountUSD(r);
-    const zec = getZecDisbursed(r);
-    const approvedDate = getApprovedDate(r);
-
-    rec.milestones.push({ paidDate, amtUsd, zec });
-    rec.totalBudget += amtUsd;
-
-    if (approvedDate) rec.approvedDates.push(approvedDate);
-
-    if (paidDate && paidDate >= thirtyDaysAgo) {
-      payout30dUSD += amtUsd;
-      payout30dZEC += zec;
-    }
-
-    if (paidDate && paidDate >= twelveMonthsAgo) {
-      payout12mUSD += amtUsd;
-      payout12mZEC += zec;
-    }
-  });
-
-  const totalProjects = projectMap.size;
-  let totalCompleted = 0;
-  let inProgress = 0;
-  let waiting = 0;
-  let approvedYTD = 0;
-  let completedYTD = 0;
-  let payoutsYTDUSD = 0;
-  let payoutsYTDZEC = 0;
-  let totalApprovedBudget = 0;
-  let approvedBudgetYTD = 0;
-  let approvedBudget30d = 0;
-
-  projectMap.forEach((rec) => {
-    const hasMilestones = rec.milestones.length > 0;
-    const allPaid = hasMilestones && rec.milestones.every((m) => !!m.paidDate);
-    const anyPaid = rec.milestones.some((m) => !!m.paidDate);
-
-    if (allPaid) totalCompleted++;
-    else if (anyPaid) inProgress++;
-    else waiting++;
-
-    const earliestApproved = rec.approvedDates.length
-      ? new Date(Math.min(...rec.approvedDates.map((d) => d.getTime())))
-      : null;
-
-    let earliestActivity = earliestApproved;
-    if (!earliestActivity) {
-      const paidDates = rec.milestones.map((m) => m.paidDate).filter(Boolean);
-      if (paidDates.length) {
-        earliestActivity = new Date(Math.min(...paidDates.map((d) => d.getTime())));
-      }
-    }
-
-    totalApprovedBudget += rec.totalBudget;
-
-    if (earliestActivity && earliestActivity.getFullYear() === year) {
-      approvedYTD++;
-      approvedBudgetYTD += rec.totalBudget;
-
-      if (earliestActivity >= thirtyDaysAgo) {
-        approvedBudget30d += rec.totalBudget;
-      }
-    }
-
-    if (earliestActivity && earliestActivity >= twelveMonthsAgo) {
-      newLiabilities12m += rec.totalBudget;
-    }
-
-    if (allPaid) {
-      const paidDates = rec.milestones.map((m) => m.paidDate).filter(Boolean);
-      if (paidDates.length) {
-        const lastPaid = new Date(Math.max(...paidDates.map((d) => d.getTime())));
-        if (lastPaid.getFullYear() === year) {
-          completedYTD++;
-        }
-      }
-    }
-
-    rec.milestones.forEach((m) => {
-      if (m.paidDate && m.paidDate.getFullYear() === year) {
-        payoutsYTDUSD += m.amtUsd;
-        payoutsYTDZEC += m.zec;
-      }
-    });
-  });
-
-  return {
-    year,
-    totalProjects,
-    totalCompleted,
-    inProgress,
-    waiting,
-    approvedYTD,
-    completedYTD,
-    payoutsYTDUSD,
-    payoutsYTDZEC,
-    payout30dUSD,
-    payout30dZEC,
-    approvedBudget30d,
-    avgMonthlyPayout12m: payout12mUSD / 12,
-    avgMonthlyPayoutZec12m: payout12mZEC / 12,
-    avgMonthlyLiabilities12m: newLiabilities12m / 12,
-    totalApprovedBudget,
-    approvedBudgetYTD,
-  };
-}
-
-function buildApprovedAllRaw(allGrantsAoA) {
-  const COL_DATE = 6;
-  const COL_TITLE = 1;
-  const COL_DECISION = 5;
-
-  const approvedRows = [];
-
-  for (let i = 1; i < allGrantsAoA.length; i++) {
-    const row = allGrantsAoA[i];
-    if (!row) continue;
-
-    const rawDate = row[COL_DATE];
-    const title = (row[COL_TITLE] || "").toString().trim();
-    const decisionRaw = (row[COL_DECISION] || "")
-      .toString()
-      .replace(/\u00A0/g, " ")
-      .trim()
-      .toLowerCase();
-    const decision = decisionRaw.replace(/[^\w\s]/g, "").trim();
-
-    if (!title || !rawDate) continue;
-    if (decision !== "approved") continue;
-
-    const d = toDate(rawDate);
-    if (!d) continue;
-
-    approvedRows.push({ date: d, title });
-  }
-
-  return approvedRows;
-}
-
-function buildCategoryTotalsFromFunds(aoaFunds) {
-  const COL_CLASSIFICATION = 14;
-  const COL_USD_PAID = 15;
-
-  const categoryTotals = {};
-
-  for (let r = 2; r < aoaFunds.length; r++) {
-    const row = aoaFunds[r] || [];
-    const labelCell = row[COL_CLASSIFICATION];
-    const valueCell = row[COL_USD_PAID];
-
-    if (typeof labelCell === "string" && labelCell.trim()) {
-      const label = labelCell.trim();
-      if (label.length > 0 && label !== "TOTAL") {
-        const amount = cleanNumber(valueCell);
-        if (amount > 0) {
-          categoryTotals[label] = (categoryTotals[label] || 0) + amount;
-        }
-      }
-    }
-  }
-
-  return categoryTotals;
-}
-
-function buildPayoutsByMonth(grantsRows) {
-  const monthlyMap = {};
-
-  grantsRows.forEach((row) => {
-    const date = toDate(row["Paid Out"]);
-    if (!date) return;
-
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
-      2,
-      "0"
-    )}`;
-
-    if (!monthlyMap[monthKey]) {
-      monthlyMap[monthKey] = { amount: 0, milestones: 0 };
-    }
-
-    monthlyMap[monthKey].amount += cleanNumber(row["Amount (USD)"]);
-    monthlyMap[monthKey].milestones += 1;
-  });
-
-  return monthlyMap;
-}
-
-function aggregateByGrantee(rawRows) {
-  const by = {};
-  rawRows.forEach((r) => {
-    by[r.grantee] = (by[r.grantee] || 0) + (r.amount || 0);
-  });
-
-  return Object.entries(by)
-    .map(([grantee, amount]) => ({ grantee, amount }))
-    .sort((a, b) => b.amount - a.amount);
-}
-
-function applyAmountFilter(aggregated, range) {
-  if (range === "all") return aggregated.slice();
-
-  switch (range) {
-    case "small":
-      return aggregated.filter((d) => d.amount < 50000);
-    case "medium":
-      return aggregated.filter((d) => d.amount >= 50000 && d.amount <= 200000);
-    case "large":
-      return aggregated.filter((d) => d.amount > 200000);
-    default:
-      return aggregated.slice();
-  }
-}
-
-function buildPaymentsData(aoaFunds) {
-  let headerRowIndex = -1;
-
-  for (let i = 0; i < Math.min(aoaFunds.length, 10); i++) {
-    const row = aoaFunds[i] || [];
-    const rowText = row.join(" ").toLowerCase();
-    if (rowText.includes("recipient") && rowText.includes("paid out")) {
-      headerRowIndex = i;
-      break;
-    }
-  }
-
-  if (headerRowIndex === -1) {
-    return {
-      paidOutRawFunds: [],
-      paidOutOriginal: [],
-      futureOriginal: [],
-    };
-  }
-
-  const headers = (aoaFunds[headerRowIndex] || []).map((h) =>
-    (h || "").toString().replace(/\u00A0/g, " ").trim()
-  );
-
-  const dataRows = aoaFunds
-    .slice(headerRowIndex + 1)
-    .filter((r) => r.some((c) => c !== null && c !== undefined && c !== ""));
-
-  const objF = dataRows.map((r) => {
-    const o = {};
-    headers.forEach((h, i) => {
-      if (h) o[h] = r[i];
-    });
-    return o;
-  });
-
-  const recipientCol = headers.find((h) => /recipient|classification/i.test(h));
-  const paidOutAmtCol = headers.find((h) => /paid\s*out/i.test(h));
-  const futureCol = headers.find((h) => /future\s*milestones/i.test(h));
-
-  if (!recipientCol || !paidOutAmtCol || !futureCol) {
-    return {
-      paidOutRawFunds: [],
-      paidOutOriginal: [],
-      futureOriginal: [],
-    };
-  }
-
-  const paidOutRawFunds = objF
-    .filter((r) => {
-      const recipient = (r[recipientCol] || "").toString().trim().toLowerCase();
-      return (
-        cleanNumber(r[paidOutAmtCol]) > 0 &&
-        r[recipientCol] &&
-        !recipient.includes("total")
-      );
-    })
-    .map((r) => ({
-      grantee: (r[recipientCol] || "").toString().trim(),
-      amount: cleanNumber(r[paidOutAmtCol]),
-      date: "",
-    }));
-
-  const paidOutOriginal = aggregateByGrantee(paidOutRawFunds);
-
-  const futureOriginal = objF
-    .map((r) => ({
-      grantee: (r[recipientCol] || "").toString().trim(),
-      amount: cleanNumber(r[futureCol]),
-    }))
-    .filter(
-      (r) =>
-        r.amount > 0 &&
-        r.grantee !== "" &&
-        !r.grantee.toLowerCase().includes("total")
-    )
-    .sort((a, b) => b.amount - a.amount);
-
-  return {
-    paidOutRawFunds,
-    paidOutOriginal,
-    futureOriginal,
-  };
-}
-
-/* ===== App Data Boot ===== */
-async function buildAppData(options = {}) {
-  await loadWorkbook(options);
-
-  const dashboardRows = sheetToAoA(SHEETS.DASHBOARD_ZCG, { blankrows: true });
-  const grantsRows = sheetToObjects(SHEETS.GRANTS_ZCG, 0);
-  const allGrantsAoA = sheetToAoA(SHEETS.ALL_GRANTS);
-  const fundsAoA = sheetToAoA(SHEETS.FUNDS);
-  const stipendsRows = sheetToObjects(SHEETS.STIPENDS, 0);
-  const icRows = sheetToObjects(SHEETS.IC_PAYOUTS, 0);
-  const liquidityAoA = sheetToAoA(SHEETS.LIQUIDITY);
-
-  const grants = buildUnifiedGrants(grantsRows, allGrantsAoA);
-  const projectTotalsMap = buildProjectTotalsFromGrants(grantsRows);
-  const grantStats = computeGrantStatsFromRows(grantsRows);
-  const approvedAllRaw = buildApprovedAllRaw(allGrantsAoA);
-  const categoryTotals = buildCategoryTotalsFromFunds(fundsAoA);
-  const payoutsByMonth = buildPayoutsByMonth(grantsRows);
-  const paymentsData = buildPaymentsData(fundsAoA);
-
-  const norm = (s) =>
-    (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
-
-  const getValue = (label) => {
-    const r = dashboardRows.find((row) => norm(row[0]).includes(norm(label)));
-    return r ? r[1] : null;
-  };
-
-  const blockTimeUTC = getValue("Block time (UTC)");
-  const dt =
-    blockTimeUTC ? toDate(blockTimeUTC) || new Date(`${blockTimeUTC} UTC`) : null;
-
-  return {
-    dashboardRows,
-    grantsRows,
-    allGrantsAoA,
-    fundsAoA,
-    stipendsRows,
-    icRows,
-    liquidityAoA,
-    grants,
-    projectTotalsMap,
-    grantStats,
-    approvedAllRaw,
-    categoryTotals,
-    payoutsByMonth,
-    paidOutRawFunds: paymentsData.paidOutRawFunds,
-    paidOutOriginal: paymentsData.paidOutOriginal,
-    futureOriginal: paymentsData.futureOriginal,
-    lastUpdateTime: dt || null,
-  };
-}
-
-async function ensureAppData({ force = false } = {}) {
-  if (!force && appData) return appData;
-  if (!force && appDataPromise) return appDataPromise;
-
-  if (!force) {
-    const cached = loadCachedAppData();
-    if (cached) {
-      appData = cached;
-      allGrants = appData.grants || [];
-      lastUpdateTime = appData.lastUpdateTime || null;
-      updateLastUpdateTime();
-      return appData;
-    }
-  }
-
-  appDataPromise = (async () => {
-    try {
-      const fresh = await buildAppData({ force });
-
-      appData = fresh;
-      allGrants = fresh.grants || [];
-      lastUpdateTime = fresh.lastUpdateTime || null;
-      updateLastUpdateTime();
-      saveCachedAppData(fresh);
-
-      return appData;
-    } finally {
-      appDataPromise = null;
-    }
-  })();
-
-  return appDataPromise;
-}
-
-async function getCachedZecPriceChart() {
-  const cached = loadTimedJsonCache(
-    ZEC_PRICE_CACHE_KEY,
-    ZEC_PRICE_CACHE_TTL_MS
-  );
-  if (cached) return cached;
-
-  if (zecPricePromise) return zecPricePromise;
-
-  zecPricePromise = (async () => {
-    const res = await fetch(ZEC_PRICE_URL, { cache: "default" });
-    if (!res.ok) {
-      throw new Error(`CoinGecko fetch failed: ${res.status}`);
-    }
-
-    const data = await res.json();
-    saveTimedJsonCache(ZEC_PRICE_CACHE_KEY, data);
-    return data;
-  })();
-
-  try {
-    return await zecPricePromise;
-  } finally {
-    zecPricePromise = null;
-  }
-}
-
-/* ===== Navigation ===== */
-function showPage(pageName) {
-  document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
-
-  const targetPage = document.getElementById(pageName);
-  if (targetPage) targetPage.classList.add("active");
-
-  document.querySelectorAll(".nav-link").forEach((l) => l.classList.remove("active"));
-  document
-    .querySelectorAll(".bottom-nav-link")
-    .forEach((l) => l.classList.remove("active"));
-  document
-    .querySelectorAll(`[data-page="${pageName}"]`)
-    .forEach((l) => l.classList.add("active"));
-
-  if (pendingGrantToOpen && !loadedTabs.has("grants")) {
-    loadGrants();
-    loadedTabs.add("grants");
-  }
-
-  if (!loadedTabs.has(pageName)) {
-    const tabInfo = tabRoutes[pageName];
-    if (tabInfo) {
-      tabInfo.load();
-      loadedTabs.add(pageName);
-    }
-  }
-
-  if (pageName === "dashboard" && loadedTabs.has("dashboard")) {
-    loadPayoutsChart();
-    loadCategoryChart();
-    loadZecPriceTrend();
-    loadApprovedChart();
-  }
-
-  if (!window.location.hash.includes("?")) {
-    history.pushState({ page: pageName }, "", `#${pageName}`);
-  }
-
-  const titles = {
-    dashboard: "Dashboard",
-    grants: "Grants",
-    payments: "Payments",
-    auditpayments: "Audit Payments",
-    liquidity: "Maya Liquidity",
-    stipends: "Stipends",
-    notetaker: "Notetaker Payments",
-  };
-
-  document.title = `${titles[pageName] || "Dashboard"} - Zcash Community Grants`;
-}
-
-function initNavigation() {
-  document.querySelectorAll(".nav-link").forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      showPage(link.dataset.page);
-    });
-  });
-
-  document.querySelectorAll(".bottom-nav-link").forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      showPage(link.dataset.page);
-    });
-  });
-
-  window.addEventListener("popstate", (e) => {
-    const page = e.state?.page || getPageFromHash();
-    showPage(page);
-  });
-
-  const initialPage = getPageFromHash();
-  showPage(initialPage);
-}
-
-function getPageFromHash() {
-  const hash = window.location.hash.substring(1);
-  const basePage = hash.split("?")[0];
-  return tabRoutes[basePage] ? basePage : "dashboard";
-}
-
-function checkPendingGrant() {
-  const hash = window.location.hash;
-  if (hash.includes("grant=")) {
-    const params = new URLSearchParams(hash.split("?")[1]);
-    const grantId = params.get("grant");
-    if (grantId) {
-      pendingGrantToOpen = decodeGrantId(grantId);
-    }
-  }
-}
-
-/* ===== Theme Toggle ===== */
-function initThemeToggle() {
-  const themeToggle = document.getElementById("themeToggle");
-  if (!themeToggle) return;
-
-  const savedTheme = localStorage.getItem("theme") || "light";
-  document.documentElement.setAttribute("data-theme", savedTheme);
-  themeToggle.textContent = savedTheme === "dark" ? "☀️" : "🌙";
-
-  themeToggle.addEventListener("click", () => {
-    const currentTheme = document.documentElement.getAttribute("data-theme");
-    const newTheme = currentTheme === "dark" ? "light" : "dark";
-
-    document.documentElement.setAttribute("data-theme", newTheme);
-    localStorage.setItem("theme", newTheme);
-    themeToggle.textContent = newTheme === "dark" ? "☀️" : "🌙";
-  });
-}
-
-/* ===== Update Time ===== */
-function updateLastUpdateTime() {
-  const desktopEl = document.getElementById("desktopUpdateTime");
-  if (!desktopEl) return;
-
-  if (lastUpdateTime) {
-    desktopEl.textContent = `Last updated: ${lastUpdateTime.toLocaleString()}`;
-  } else {
-    desktopEl.textContent = "Last updated: Unavailable";
-  }
-}
-
-function startUpdateTimeFallback() {
-  updateTimeTimeout = setTimeout(() => {
-    if (!lastUpdateTime) updateLastUpdateTime();
-  }, 10000);
-}
-
-/* ===== Search & Filters ===== */
-function setupSearch() {
-  const searchInput = document.getElementById("desktopSearch");
-  if (!searchInput) return;
-
-  searchInput.addEventListener("focus", () => {
-    if (window.location.hash.split("?")[0] !== "#grants") {
-      showPage("grants");
-    }
-  });
-
-  searchInput.addEventListener(
-    "input",
-    debounce((e) => {
-      const query = (e.target.value || "").toLowerCase();
-      filterGrantsBySearch(query);
-    }, 150)
-  );
-}
-
-function initGrantsFilters() {
-  document.querySelectorAll("#statusFilters .filter-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document
-        .querySelectorAll("#statusFilters .filter-tab")
-        .forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentStatusFilter = btn.dataset.filter;
-      applyFilters();
-    });
-  });
-
-  document.querySelectorAll("#budgetFilters .filter-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document
-        .querySelectorAll("#budgetFilters .filter-tab")
-        .forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentBudgetFilter = btn.dataset.budget;
-      applyFilters();
-    });
-  });
-
-  const sortBtn = document.getElementById("sortBtn");
-  if (sortBtn) {
-    sortBtn.addEventListener("click", cycleSortMode);
-  }
-
-  document.querySelectorAll(".view-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".view-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const container = document.getElementById("grantsContainer");
-      if (container) {
-        container.classList.toggle("list-view", btn.dataset.view === "list");
-      }
-    });
-  });
-}
-
-function initDashboardFilters() {
-  document.querySelectorAll("#timeFilters .filter-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document
-        .querySelectorAll("#timeFilters .filter-tab")
-        .forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentTimeFilter = btn.dataset.range;
-      loadPayoutsChart();
-    });
-  });
-}
-
-/* ===== Chart Options ===== */
-const getChartOptions = () => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: {
-      labels: {
-        color: getComputedStyle(document.documentElement)
-          .getPropertyValue("--text-secondary")
-          .trim(),
-        font: { size: 12, weight: "400" },
-      },
-    },
-  },
-  scales: {
-    x: {
-      grid: {
-        color: getComputedStyle(document.documentElement)
-          .getPropertyValue("--grid-color")
-          .trim(),
-      },
-      ticks: {
-        color: getComputedStyle(document.documentElement)
-          .getPropertyValue("--text-tertiary")
-          .trim(),
-        font: { size: 11 },
-      },
-    },
-    y: {
-      grid: {
-        color: getComputedStyle(document.documentElement)
-          .getPropertyValue("--grid-color")
-          .trim(),
-      },
-      ticks: {
-        color: getComputedStyle(document.documentElement)
-          .getPropertyValue("--text-tertiary")
-          .trim(),
-        font: { size: 11 },
-      },
-    },
-  },
-});
-
-/* ===== Global Event Listeners ===== */
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    const modalOverlay = document.getElementById("modalOverlay");
-    if (modalOverlay && modalOverlay.classList.contains("active")) {
-      closeModal();
-    }
-  }
-});
-
-/* ===== URL Filter Functions ===== */
-function updateURLWithFilters() {
-  if (window.location.hash.split("?")[0] !== "#grants") return;
-
-  const params = new URLSearchParams();
-  if (currentStatusFilter !== "all") params.set("status", currentStatusFilter);
-  if (currentBudgetFilter !== "all") params.set("budget", currentBudgetFilter);
-  if (currentCategoryFilter !== "all") params.set("category", currentCategoryFilter);
-  if (currentSortMode !== 0) params.set("sort", sortModes[currentSortMode].key);
-
-  const currentHash = window.location.hash;
-  if (currentHash.includes("grant=")) {
-    const currentParams = new URLSearchParams(currentHash.split("?")[1] || "");
-    const grant = currentParams.get("grant");
-    if (grant) params.set("grant", grant);
-  }
-
-  const paramString = params.toString();
-  const newHash = paramString ? `#grants?${paramString}` : "#grants";
-  history.replaceState({ page: "grants" }, "", newHash);
-}
-
-function readFiltersFromURL() {
-  const hash = window.location.hash;
-  if (!hash.startsWith("#grants")) return false;
-
-  const queryPart = hash.split("?")[1];
-  if (!queryPart) return false;
-
-  const params = new URLSearchParams(queryPart);
-
-  if (params.has("status")) {
-    currentStatusFilter = params.get("status");
-    document.querySelectorAll("#statusFilters .filter-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.filter === currentStatusFilter);
-    });
-  }
-
-  if (params.has("budget")) {
-    currentBudgetFilter = params.get("budget");
-    document.querySelectorAll("#budgetFilters .filter-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.budget === currentBudgetFilter);
-    });
-  }
-
-  if (params.has("category")) {
-    currentCategoryFilter = params.get("category");
-  }
-
-  if (params.has("sort")) {
-    const sortKey = params.get("sort");
-    const idx = sortModes.findIndex((m) => m.key === sortKey);
-    if (idx >= 0) {
-      currentSortMode = idx;
-      const sortBtn = document.getElementById("sortBtn");
-      if (sortBtn) {
-        sortBtn.innerHTML = `${sortModes[idx].icon} ${sortModes[idx].text}`;
-      }
-    }
-  }
-
-  return true;
-}
-
-/* ===== Dashboard / Overview ===== */
-async function loadOverview() {
-  try {
-    const data = await ensureAppData();
-    clearTimeout(updateTimeTimeout);
-    updateLastUpdateTime();
-
-    const rows = data.dashboardRows;
-    const grantStats = data.grantStats;
-
-    const norm = (s) =>
-      (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
-
-    const getValue = (label) => {
-      const r = rows.find((row) => norm(row[0]).includes(norm(label)));
-      return r ? r[1] : null;
-    };
-
-    const getCellValue = (rowIndex, colIndex) => {
-      const row = rows[rowIndex];
-      return row ? row[colIndex] : null;
-    };
-
-    const zecPrice = cleanNumber(getValue("ZECUSD price"));
-    const zecBal = cleanNumber(getValue("Current ZEC balance"));
-    const usdBal = cleanNumber(getValue("Current USD balance"));
-    const futureLiab = Math.abs(cleanNumber(getValue("Future grant liabilities")));
-    const overhedgePercent = cleanNumber(getCellValue(48, 2)) * 100;
-    const totalLifetimePayouts = cleanNumber(getCellValue(42, 1));
-    const zecValueUSD = zecBal * zecPrice;
-    const totalTreasuryUSD = zecValueUSD + usdBal;
-
-    const DAILY_ZEC_INFLOW = 144;
-    const MONTHLY_ZEC_INFLOW = DAILY_ZEC_INFLOW * 30;
-    const monthlyInflowUSD = MONTHLY_ZEC_INFLOW * zecPrice;
-
-    let otherPayouts30d = 0;
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    data.icRows.forEach((r) => {
-      const paidDate = toDate(r["Paid Out"]);
-      if (paidDate && paidDate >= thirtyDaysAgo) {
-        otherPayouts30d += cleanNumber(r["Amount (USD)"]);
-      }
-    });
-
-    data.stipendsRows.forEach((r) => {
-      const paidDate = toDate(r["Date"]);
-      if (paidDate && paidDate >= thirtyDaysAgo) {
-        otherPayouts30d += cleanNumber(r["USD Amount"]);
-      }
-    });
-
-    const totalPayouts30d = grantStats.payout30dUSD + otherPayouts30d;
-
-    const usdMetricsEl = document.getElementById("usdMetrics");
-    const activityEl = document.getElementById("activityMetrics");
-    if (!usdMetricsEl || !activityEl) return;
-
-    const netFlow = monthlyInflowUSD - totalPayouts30d;
-    const netFlowClass =
-      netFlow >= 0 ? "color:var(--success)" : "color:var(--danger)";
-    const avgBudgetAllTime =
-      grantStats.totalProjects > 0
-        ? grantStats.totalApprovedBudget / grantStats.totalProjects
-        : 0;
-    const avgGrantSizeYTD =
-      grantStats.approvedYTD > 0
-        ? grantStats.approvedBudgetYTD / grantStats.approvedYTD
-        : 0;
-
-    usdMetricsEl.innerHTML = `
-      <div class="stat-card">
-        <div class="stat-label">Total Treasury Value</div>
-        <div class="stat-value">${formatUSD(totalTreasuryUSD)}</div>
-        <div class="stat-change" style="margin-top:0.5rem;">
-          <div><strong>ZEC Price:</strong> $${zecPrice.toFixed(2)}</div>
-          <div><strong>ZEC:</strong> ${zecBal.toLocaleString(undefined, {
-            maximumFractionDigits: 0,
-          })} (${formatUSD(zecValueUSD)})</div>
-          <div><strong>USD Stables:</strong> ${formatUSD(usdBal)}</div>
-          <div style="color:var(--success);">
-            <strong>Overhedge:</strong> ${overhedgePercent.toFixed(0)}% of assets
-          </div>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-label">30 Day Inflow & Outflow</div>
-        <div class="stat-value" style="${netFlowClass}">
-          ${netFlow >= 0 ? "+" : ""}${formatUSD(netFlow)}
-        </div>
-        <div class="stat-change" style="margin-top:0.5rem;">
-          <div>
-            <strong>Income:</strong> ${MONTHLY_ZEC_INFLOW.toLocaleString()} ZEC
-            (${formatUSD(monthlyInflowUSD)}) — ${DAILY_ZEC_INFLOW} ZEC/day
-          </div>
-          <div style="margin-top:0.35rem;">
-            <strong>Grant Payouts:</strong> ${formatUSD(grantStats.payout30dUSD)}
-          </div>
-          <div><strong>Other Payouts:</strong> ${formatUSD(otherPayouts30d)}</div>
-          <div style="font-size:0.8em;color:var(--text-tertiary);">
-            (Audit, Notetaker, Committee)
-          </div>
-          <div style="margin-top:0.35rem;font-weight:600;">
-            <strong>Total Payouts:</strong> ${formatUSD(totalPayouts30d)}
-          </div>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-label">Future Liabilities</div>
-        <div class="stat-value">${formatUSD(futureLiab)}</div>
-        <div class="stat-change" style="margin-top:0.5rem;">
-          <div><strong>Grants in progress:</strong> ${formatUSD(futureLiab)}</div>
-          <div style="margin-top:0.35rem;">
-            <strong>New Approved (30d):</strong> ${formatUSD(
-              grantStats.approvedBudget30d
-            )}
-          </div>
-        </div>
-      </div>
-    `;
-
-    activityEl.innerHTML = `
-      <div class="stat-card">
-        <div class="stat-label">Total Stats</div>
-        <div class="stat-value">Lifetime payouts: ${formatUSD(
-          totalLifetimePayouts
-        )}</div>
-        <div class="stat-value">${grantStats.totalProjects.toLocaleString()} Grants</div>
-        <div class="stat-change">
-          <div>
-            <strong>Status:</strong> ${grantStats.totalCompleted} Done ·
-            ${grantStats.inProgress} Active · ${grantStats.waiting} Pending
-          </div>
-          <div style="margin-top:0.35rem;">
-            <strong>Avg Budget:</strong> ${formatUSD(avgBudgetAllTime)}
-          </div>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-label">${grantStats.year} Activity</div>
-        <div class="stat-value">${grantStats.approvedYTD} Approved</div>
-        <div class="stat-change">
-          <div><strong>Completed:</strong> ${grantStats.completedYTD}</div>
-          <div><strong>Payouts:</strong> ${formatUSD(grantStats.payoutsYTDUSD)}</div>
-          <div>
-            <strong>New Liabilities:</strong> ${formatUSD(
-              grantStats.approvedBudgetYTD
-            )}
-          </div>
-          <div style="margin-top:0.35rem;">
-            <strong>Avg Size:</strong> ${formatUSD(avgGrantSizeYTD)}
-          </div>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-label">Avg Monthly Payouts (12M)</div>
-        <div class="stat-value">${formatUSD(grantStats.avgMonthlyPayout12m)}</div>
-        <div class="stat-change">
-          <div>
-            <strong>ZEC:</strong> ${grantStats.avgMonthlyPayoutZec12m.toFixed(
-              2
-            )} ZEC/month
-          </div>
-          <div>
-            <strong>New Liabilities/mo:</strong> ${formatUSD(
-              grantStats.avgMonthlyLiabilities12m
-            )}
-          </div>
-        </div>
-      </div>
-    `;
-
-    requestIdleCallbackSafe(() => {
-      loadPayoutsChart();
-      loadCategoryChart();
-      loadZecPriceTrend();
-      loadApprovedChart();
-    });
-  } catch (error) {
-    console.error("Error in loadOverview:", error);
-    const usdEl = document.getElementById("usdMetrics");
-    const actEl = document.getElementById("activityMetrics");
-    if (usdEl) {
-      usdEl.innerHTML =
-        '<div class="loading-placeholder">Error loading treasury metrics</div>';
-    }
-    if (actEl) {
-      actEl.innerHTML =
-        '<div class="loading-placeholder">Error loading grants metrics</div>';
-    }
-  }
-}
-
-/* ===== Request Idle Safe ===== */
-function requestIdleCallbackSafe(fn) {
-  if ("requestIdleCallback" in window) {
-    window.requestIdleCallback(fn);
-  } else {
-    setTimeout(fn, 0);
-  }
-}
-
-/* ===== Payouts Chart ===== */
-function filterMonthlyMapByTime(monthlyMap, range) {
-  const now = new Date();
-  let startDate = new Date();
-
-  switch (range) {
-    case "1m":
-      startDate.setDate(now.getDate() - 30);
-      break;
-    case "3m":
-      startDate.setDate(now.getDate() - 90);
-      break;
-    case "1y":
-      startDate.setFullYear(now.getFullYear() - 1);
-      break;
-    case "ytd":
-      startDate = new Date(now.getFullYear(), 0, 1);
-      break;
-    case "max":
-      startDate = new Date(2020, 0, 1);
-      break;
-  }
-
-  const filteredEntries = Object.entries(monthlyMap).filter(([monthKey]) => {
-    const [year, month] = monthKey.split("-").map(Number);
-    const d = new Date(year, month - 1, 1);
-    return d >= startDate;
-  });
-
-  filteredEntries.sort(([a], [b]) => a.localeCompare(b));
-
-  return {
-    labels: filteredEntries.map(([m]) => m),
-    amounts: filteredEntries.map(([, v]) => v.amount),
-    milestones: filteredEntries.map(([, v]) => v.milestones),
-  };
-}
-
-async function loadPayoutsChart() {
-  try {
-    const data = await ensureAppData();
-    const chartData = filterMonthlyMapByTime(data.payoutsByMonth, currentTimeFilter);
-
-    const ctx = document.getElementById("payoutsChart");
-    if (!ctx) return;
-    if (ctx.chart) ctx.chart.destroy();
-
-    ctx.chart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: chartData.labels,
-        datasets: [
-          {
-            label: "Milestones",
-            data: chartData.milestones,
-            borderColor: "#ff9800",
-            backgroundColor: "rgba(255,152,0,0.2)",
-            yAxisID: "y1",
-            tension: 0.4,
-          },
-          {
-            label: "Payouts (USD)",
-            data: chartData.amounts,
-            borderColor:
-              getComputedStyle(document.documentElement)
-                .getPropertyValue("--accent-third")
-                .trim() || "#ffc17c",
-            backgroundColor: "rgba(255,193,124,0.2)",
-            yAxisID: "y2",
-            tension: 0.4,
-          },
-        ],
-      },
-      options: {
-        ...getChartOptions(),
-        interaction: { mode: "index", intersect: false },
-        scales: {
-          x: getChartOptions().scales.x,
-          y1: {
-            type: "linear",
-            position: "left",
-            title: { display: true, text: "Milestones" },
-            beginAtZero: true,
-            grid: {
-              color: getComputedStyle(document.documentElement)
-                .getPropertyValue("--grid-color")
-                .trim(),
-            },
-            ticks: {
-              color: getComputedStyle(document.documentElement)
-                .getPropertyValue("--text-tertiary")
-                .trim(),
-            },
-          },
-          y2: {
-            type: "linear",
-            position: "right",
-            title: { display: true, text: "USD" },
-            grid: { drawOnChartArea: false },
-            ticks: {
-              color: getComputedStyle(document.documentElement)
-                .getPropertyValue("--text-tertiary")
-                .trim(),
-            },
-          },
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error loading payouts chart:", error);
-  }
-}
-
-/* ===== Category Chart ===== */
-async function loadCategoryChart() {
-  try {
-    const data = await ensureAppData();
-    const categoryTotals = data.categoryTotals || {};
-    const entries = Object.entries(categoryTotals).filter(([, v]) => v > 0);
-
-    const canvas = document.getElementById("categoryChart");
-    if (!canvas) return;
-
-    if (!entries.length) {
-      canvas.parentNode.innerHTML =
-        '<div class="loading-placeholder">No category data found</div>';
+    if (!parsedDate) {
+      if (matchesSecurity) console.warn("⚠️ Security candidate dropped: missing or unparseable Date!", row);
+      skippedNoDate++;
       return;
     }
 
-    const sorted = entries.sort((a, b) => b[1] - a[1]);
-    const labels = sorted.map(([cat]) => cat);
-    const values = sorted.map(([, amount]) => amount);
-    const total = values.reduce((sum, v) => sum + v, 0);
-
-    const colors = [
-      "#FFF3C4",
-      "#FFE08A",
-      "#FFC04D",
-      "#FFB347",
-      "#FFA534",
-      "#FF9F1C",
-      "#FF8C42",
-      "#FF7F50",
-      "#FF7043",
-      "#FF6347",
-      "#F4511E",
-      "#E64A19",
-      "#D84315",
-      "#BF360C",
-      "#FFD166",
-    ];
-
-    if (canvas.chart) canvas.chart.destroy();
-
-    canvas.chart = new Chart(canvas, {
-      type: "doughnut",
-      data: {
-        labels,
-        datasets: [
-          {
-            data: values,
-            backgroundColor: colors.slice(0, labels.length),
-            borderColor:
-              getComputedStyle(document.documentElement)
-                .getPropertyValue("--bg-primary")
-                .trim() || "#1a1a2e",
-            borderWidth: 2,
-            hoverOffset: 8,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: "28%",
-        plugins: {
-          legend: {
-            display: true,
-            position: "bottom",
-            labels: {
-              color: getComputedStyle(document.documentElement)
-                .getPropertyValue("--text-secondary")
-                .trim(),
-              font: { size: 10 },
-              padding: 10,
-              usePointStyle: true,
-              pointStyle: "circle",
-            },
-          },
-          tooltip: {
-            callbacks: {
-              label(context) {
-                const value = context.parsed || 0;
-                const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
-                return `${context.label}: ${formatUSD(value)} (${pct}%)`;
-              },
-            },
-          },
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error loading category chart:", error);
-    const canvas = document.getElementById("categoryChart");
-    if (canvas?.parentNode) {
-      canvas.parentNode.innerHTML =
-        '<div class="loading-placeholder">Error loading category data</div>';
+    if (computedUsd <= 0) {
+      if (matchesSecurity) console.warn("⚠️ Security candidate dropped: USD amount <= 0!", row);
+      skippedNoUsd++;
+      return;
     }
-  }
-}
 
-/* ===== ZEC Price Trend ===== */
-async function loadZecPriceTrend() {
-  try {
-    const data = await getCachedZecPriceChart();
-
-    const filtered = (data.prices || []).filter((_, i) => i % 24 === 0);
-    const prices = filtered.map((p) => ({ date: new Date(p[0]), price: p[1] }));
-
-    const ctx = document.getElementById("zecPriceChart");
-    if (!ctx) return;
-    if (ctx.chart) ctx.chart.destroy();
-
-    ctx.chart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: prices.map((p) => p.date.toLocaleDateString()),
-        datasets: [
-          {
-            label: "ZEC/USD",
-            data: prices.map((p) => p.price),
-            borderColor: getComputedStyle(document.documentElement)
-              .getPropertyValue("--accent-primary")
-              .trim(),
-            backgroundColor: "rgba(255,193,124,0.2)",
-            fill: true,
-            tension: 0.4,
-            pointRadius: 2,
-            pointHoverRadius: 5,
-          },
-        ],
-      },
-      options: getChartOptions(),
+    out.push({
+      type: securityType(text),
+      project: description,
+      recipient: c.recipient >= 0 ? String(row[c.recipient] ?? "").trim() : "",
+      date: parsedDate,
+      usd: computedUsd,
+      zec: zecAmount,
+      rate,
+      match: matchesSecurity,
     });
-  } catch (error) {
-    console.error("Error loading ZEC price:", error);
+  });
+
+  const securityMatches = out.filter((r) => r.match);
+  console.log(`Summary: ${out.length} valid dated rows, ${securityMatches.length} flagged as security.`);
+  console.log("Matched security rows:", securityMatches);
+  if (skippedNoDate) console.log(`Skipped ${skippedNoDate} rows missing dates.`);
+  if (skippedNoUsd) console.log(`Skipped ${skippedNoUsd} rows with 0 or missing USD.`);
+  console.groupEnd();
+
+  return out;
+}
+
+function safeURL(value) {
+  try {
+    const url = new URL(value);
+    return ["https:", "http:"].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
   }
 }
 
-/* ===== Approved Grants Chart ===== */
-function filterByTimeApproved(raw, range) {
-  if (!Array.isArray(raw)) return [];
-  if (range === "max") return raw.slice();
-
-  const now = new Date();
-  let start = new Date();
-
-  switch (range) {
-    case "1m":
-      start.setMonth(now.getMonth() - 1);
-      break;
-    case "3m":
-      start.setMonth(now.getMonth() - 3);
-      break;
-    case "1y":
-      start.setFullYear(now.getFullYear() - 1);
-      break;
-    case "ytd":
-      start = new Date(now.getFullYear(), 0, 1);
-      break;
-    default:
-      return raw.slice();
+function readCache(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key));
+  } catch {
+    return null;
   }
-
-  return raw.filter((r) => {
-    const d = toDate(r.date);
-    return d && d >= start;
-  });
 }
 
-function bucketApprovedByMonthJoined(raw, projectMap) {
-  const byMonth = {};
+function writeCache(key, value) {
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({ timestamp: Date.now(), value }),
+    );
+  } catch {
+    // Dashboard still works when storage is blocked or full.
+  }
+}
 
-  raw.forEach((r) => {
-    const d = toDate(r.date);
-    if (!d) return;
-
-    const keyMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      "0"
-    )}`;
-
-    if (!byMonth[keyMonth]) byMonth[keyMonth] = { amount: 0, count: 0 };
-    byMonth[keyMonth].count += 1;
-
-    const usd = projectMap[normKey(r.title)] || 0;
-    byMonth[keyMonth].amount += usd;
-  });
-
-  const entries = Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b));
-  return {
-    labels: entries.map(([k]) => k),
-    amounts: entries.map(([, v]) => v.amount),
-    counts: entries.map(([, v]) => v.count),
+function debounce(fn, delay = 160) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
   };
 }
 
-function renderApprovedChartJoined(data) {
-  const ctx = document.getElementById("approvedChart");
-  if (!ctx) return;
-  if (ctx.chart) ctx.chart.destroy();
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (libraryPromise) return libraryPromise;
+  libraryPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = XLSX_LIBRARY;
+    script.onload = () => resolve(window.XLSX);
+    script.onerror = () => {
+      script.remove();
+      libraryPromise = null;
+      reject(new Error("Could not load spreadsheet reader."));
+    };
+    document.head.append(script);
+  });
+  return libraryPromise;
+}
 
-  const { labels, amounts, counts } = data;
+function yearStart() {
+  return new Date(new Date().getFullYear(), 0, 1);
+}
 
-  ctx.chart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Grants",
-          data: counts,
-          borderColor: "#ff9800",
-          backgroundColor: "rgba(255,152,0,0.2)",
-          yAxisID: "y1",
-          tension: 0.4,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-        },
-        {
-          label: "Approved (USD)",
-          data: amounts,
-          borderColor:
-            getComputedStyle(document.documentElement)
-              .getPropertyValue("--accent-third")
-              .trim() || "#ffc17c",
-          backgroundColor: "rgba(255,193,124,0.2)",
-          yAxisID: "y2",
-          tension: 0.4,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-        },
-      ],
-    },
-    options: {
-      ...getChartOptions(),
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        x: getChartOptions().scales.x,
-        y1: {
-          type: "linear",
-          position: "left",
-          title: { display: true, text: "Grants (count)" },
-          beginAtZero: true,
-          grid: {
-            color: getComputedStyle(document.documentElement)
-              .getPropertyValue("--grid-color")
-              .trim(),
-          },
-          ticks: {
-            color: getComputedStyle(document.documentElement)
-              .getPropertyValue("--text-tertiary")
-              .trim(),
-          },
-        },
-        y2: {
-          type: "linear",
-          position: "right",
-          title: { display: true, text: "USD" },
-          grid: { drawOnChartArea: false },
-          ticks: {
-            color: getComputedStyle(document.documentElement)
-              .getPropertyValue("--text-tertiary")
-              .trim(),
-            callback: (v) => formatUSD(v),
-          },
-        },
-      },
-    },
+function ytdRows(rows) {
+  const start = yearStart();
+  const now = new Date();
+  return rows.filter((row) => {
+    const d = date(row.date);
+    return d && d >= start && d <= now;
   });
 }
 
-function setupApprovedTimeFilters() {
-  const container = document.getElementById("approvedTimeFilters");
-  if (!container || container.dataset.bound === "1") return;
-
-  container.querySelectorAll(".filter-tab").forEach((pill) => {
-    pill.addEventListener("click", () => {
-      container
-        .querySelectorAll(".filter-tab")
-        .forEach((p) => p.classList.remove("active"));
-      pill.classList.add("active");
-      currentApprovedTimeFilter = pill.dataset.range || "ytd";
-      loadApprovedChart();
-    });
-  });
-
-  container.dataset.bound = "1";
+/* ========================================================================
+ * Spreadsheet parsing
+ * ===================================================================== */
+function decision(value) {
+  const text = norm(value);
+  if (/reject|declin/.test(text)) return "rejected";
+  if (/withdraw|cancel|filter/.test(text)) return "excluded";
+  if (/discuss/.test(text)) return "discussion";
+  if (/approved/.test(text)) return "approved";
+  return "unknown";
 }
 
-async function loadApprovedChart() {
-  try {
-    const data = await ensureAppData();
-    const filtered = filterByTimeApproved(
-      data.approvedAllRaw,
-      currentApprovedTimeFilter
+function objects(rows, headerIndex = 0) {
+  const headers = (rows[headerIndex] || []).map((value) =>
+    String(value ?? "").trim(),
+  );
+  return rows
+    .slice(headerIndex + 1)
+    .filter((row) => row.some((cell) => cell !== "" && cell != null))
+    .map((row) =>
+      Object.fromEntries(
+        headers
+          .map((header, index) => [header, row[index]])
+          .filter(([header]) => header),
+      ),
     );
-    const bucketed = bucketApprovedByMonthJoined(
-      filtered,
-      data.projectTotalsMap
-    );
-    renderApprovedChartJoined(bucketed);
-    setupApprovedTimeFilters();
-  } catch (err) {
-    console.error("Error loading approved chart:", err);
+}
+
+function securityType(text) {
+  if (/bount/i.test(text)) return "Bounty";
+  if (/audit|pentest/i.test(text)) return "Audit";
+  return "Security";
+}
+
+/* Returns every dated Disc. Budget payment. `match` marks the rows that
+ * look like security spending (bounties, audits) for the Security page. */
+function parseBudgetSheet(workbook) {
+  const name = workbook.SheetNames.find((n) => SECURITY_SHEET.test(n));
+  if (!name) {
+    console.warn("Disc. budget sheet not found. Tabs:", workbook.SheetNames);
+    return [];
   }
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
+    header: 1,
+    raw: true,
+    blankrows: true,
+    defval: "",
+  });
+  const headerIndex = rows.findIndex((row) => {
+    const cells = row.map(norm);
+    return (
+      cells.some((c) => /^date|^paid/.test(c)) &&
+      cells.some((c) => /usd/.test(c)) &&
+      cells.some((c) => /recipient|payee|contractor|name/.test(c))
+    );
+  });
+  if (headerIndex < 0) {
+    console.warn("Disc. budget header not found in", name, rows.slice(0, 6));
+    return [];
+  }
+  const headers = rows[headerIndex].map(norm);
+  const find = (pattern, exclude) =>
+    headers.findIndex((h) => pattern.test(h) && !(exclude && exclude.test(h)));
+  const c = {
+    date: find(/^date|^paid/),
+    recipient: find(/recipient|payee|contractor|^name/),
+    desc: find(/description|purpose|item|memo|notes?|project|title/),
+    rate: find(/zec\s*\/\s*usd|rate|price/),
+  };
+  c.usd = find(/usd/, /\/|rate|price/);
+  c.zec = find(/^zec/, /\/|rate|price|usd/);
+
+  const out = rows
+    .slice(headerIndex + 1)
+    .map((row) => {
+      const text = row.join(" ");
+      const description = String(
+        (c.desc >= 0 ? row[c.desc] : "") || text,
+      ).trim();
+      const zecAmount = c.zec >= 0 ? number(row[c.zec]) : 0;
+      const rate = c.rate >= 0 ? number(row[c.rate]) : 0;
+      return {
+        type: securityType(text),
+        project: description,
+        recipient: c.recipient >= 0 ? String(row[c.recipient] ?? "").trim() : "",
+        date: c.date >= 0 ? iso(row[c.date]) : null,
+        usd: (c.usd >= 0 ? number(row[c.usd]) : 0) || zecAmount * rate,
+        zec: zecAmount,
+        rate,
+        match: SECURITY_TEXT.test(text),
+      };
+    })
+    .filter((row) => row.date && row.usd > 0);
+  console.info(
+    `Disc. budget: ${out.length} dated rows, ${out.filter((r) => r.match).length} security rows`,
+  );
+  return out;
 }
 
-/* ===== Grants ===== */
-async function loadGrants() {
-  try {
-    const data = await ensureAppData();
-    allGrants = data.grants || [];
-    readFiltersFromURL();
-    setupCategoryFilters();
-    applyFilters();
-    openGrantFromURL();
-  } catch (error) {
-    console.error("Error in loadGrants:", error);
-    const container = document.getElementById("grantsContainer");
-    if (container) {
-      container.innerHTML =
-        '<div class="loading-placeholder">Error loading grants data</div>';
+function buildData(workbook) {
+  const raw = {};
+  for (const [key, name] of Object.entries(sheets)) {
+    const sheet = workbook.Sheets[name];
+    raw[key] = sheet
+      ? XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          raw: true,
+          blankrows: true,
+          defval: "",
+        })
+      : [];
+  }
+
+  if (!raw.dashboard.length || !raw.grants.length) {
+    throw new Error("Required dashboard or grants sheet is missing.");
+  }
+
+  const grantRows = objects(raw.grants);
+  const trackingHeaders = (raw.tracking[0] || []).map(norm);
+  const forumIndex = trackingHeaders.findIndex(
+    (header) => header.includes("forum") && header.includes("link"),
+  );
+  const metadata = new Map();
+  const approvals = [];
+
+  for (const row of raw.tracking.slice(1)) {
+    const project = String(row[1] || "").trim();
+    if (!project) continue;
+    const status = decision(row[5]);
+    const key = norm(project);
+    const previous = metadata.get(key);
+    const submitted = iso(row[0]);
+
+    metadata.set(key, {
+      submitted:
+        previous?.submitted && submitted
+          ? previous.submitted < submitted
+            ? previous.submitted
+            : submitted
+          : previous?.submitted || submitted,
+      decision: status,
+      forum: safeURL(row[forumIndex]) || previous?.forum || null,
+    });
+
+    const approved = iso(row[6]);
+    if (status === "approved" && approved) {
+      approvals.push({
+        project,
+        grantee: String(row[2] || "").trim(),
+        date: approved,
+      });
     }
   }
-}
 
-/* ===== URL Sharing ===== */
-function encodeGrantId(project, grantee) {
-  return encodeURIComponent(`${project}::${grantee}`);
-}
+  const grantMap = new Map();
+  const payouts = [];
+  const totals = {};
 
-function decodeGrantId(id) {
-  const decoded = decodeURIComponent(id);
-  const parts = decoded.split("::");
-  if (parts.length >= 2) {
-    return { project: parts[0], grantee: parts.slice(1).join("::") };
-  }
-  return null;
-}
-
-/* ===== Grant Sorting ===== */
-function cycleSortMode() {
-  currentSortMode = (currentSortMode + 1) % sortModes.length;
-  const mode = sortModes[currentSortMode];
-
-  const sortBtn = document.getElementById("sortBtn");
-  if (sortBtn) sortBtn.innerHTML = `${mode.icon} ${mode.text}`;
-
-  sortGrants();
-  updateURLWithFilters();
-}
-
-function sortGrants() {
-  const mode = sortModes[currentSortMode];
-  const getDate = (g) => g.lastPaidDate || g.submissionDate;
-
-  switch (mode.key) {
-    case "newest":
-      filteredGrants.sort((a, b) => {
-        const dateA = getDate(a);
-        const dateB = getDate(b);
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
-        if (!dateB) return -1;
-        return dateB - dateA;
+  for (const row of grantRows) {
+    const project = String(row.Project || "").trim();
+    const grantee = String(
+      row.Grantee ||
+        row["Applicant(s)"] ||
+        row.Applicant ||
+        row.Recipient ||
+        "",
+    ).trim();
+    if (!project || !grantee) continue;
+    const key = JSON.stringify([project, grantee]);
+    const meta = metadata.get(norm(project)) || {};
+    if (!grantMap.has(key)) {
+      grantMap.set(key, {
+        id: key,
+        project,
+        grantee,
+        submitted: meta.submitted || null,
+        decision:
+          meta.decision && meta.decision !== "unknown"
+            ? meta.decision
+            : "approved",
+        forum: meta.forum || null,
+        category: "",
+        milestones: [],
+        total: 0,
+        paid: 0,
+        lastPaid: null,
       });
-      break;
-    case "oldest":
-      filteredGrants.sort((a, b) => {
-        const dateA = getDate(a);
-        const dateB = getDate(b);
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return -1;
-        if (!dateB) return 1;
-        return dateA - dateB;
-      });
-      break;
-    case "biggest":
-      filteredGrants.sort((a, b) => b.totalAmount - a.totalAmount);
-      break;
-    case "smallest":
-      filteredGrants.sort((a, b) => a.totalAmount - b.totalAmount);
-      break;
-  }
-
-  renderGrants(filteredGrants);
-}
-
-/* ===== Grant Filters ===== */
-function filterByStatusSet(grants, statusFilter) {
-  if (statusFilter === "all") {
-    return grants.filter(
-      (g) => g.decisionStatus !== "rejected" && g.decisionStatus !== "discussion"
+    }
+    const grant = grantMap.get(key);
+    const categoryKey = Object.keys(row).find((header) =>
+      norm(header).startsWith("category"),
     );
+    grant.category ||= String(row[categoryKey] || "").trim();
+    const amount = number(row["Amount (USD)"]);
+    const paid = iso(row["Paid Out"]);
+    grant.total += amount;
+    totals[norm(project)] = (totals[norm(project)] || 0) + amount;
+    grant.milestones.push({
+      amount,
+      paid,
+      due: iso(row["Milestone Due Date"]),
+      estimate: iso(row.Estimate),
+    });
+    if (paid) {
+      grant.paid += amount;
+      if (!grant.lastPaid || paid > grant.lastPaid) grant.lastPaid = paid;
+      payouts.push({
+        date: paid,
+        amount,
+        kind: "grant",
+        name: grantee,
+        project,
+      });
+    }
   }
 
-  if (statusFilter === "discussion") {
-    return grants.filter((g) => g.decisionStatus === "discussion");
+  for (const row of raw.tracking.slice(1)) {
+    const status = decision(row[5]);
+    if (!["rejected", "discussion"].includes(status)) continue;
+    const project = String(row[1] || "").trim();
+    const grantee = String(row[2] || "").trim();
+    if (!project || !grantee) continue;
+    const key = JSON.stringify([project, grantee]);
+    if (grantMap.has(key)) continue;
+    const meta = metadata.get(norm(project)) || {};
+    grantMap.set(key, {
+      id: key,
+      project,
+      grantee,
+      submitted: meta.submitted || iso(row[0]),
+      decision: status,
+      forum: meta.forum || null,
+      category: "",
+      milestones: [],
+      total: 0,
+      paid: 0,
+      lastPaid: null,
+    });
   }
 
-  if (statusFilter === "declined") {
-    return grants.filter((g) => g.decisionStatus === "rejected");
+  const grants = [...grantMap.values()]
+    .filter((grant) => grant.decision !== "excluded")
+    .map((grant) => {
+      const done = grant.milestones.filter((item) => item.paid).length;
+      return {
+        ...grant,
+        done,
+        status:
+          done && done === grant.milestones.length
+            ? "completed"
+            : done
+              ? "in-progress"
+              : "waiting",
+        search: norm(`${grant.project} ${grant.grantee} ${grant.category}`),
+      };
+    });
+
+  const contractors = objects(raw.contractors)
+    .filter((row) => row.Project || row["Independent Contractor (IC)"])
+    .map((row) => ({
+      project: String(row.Project || ""),
+      recipient: String(row["Independent Contractor (IC)"] || ""),
+      date: iso(row["Paid Out"]),
+      usd: number(row["Amount (USD)"]),
+      zec: number(row["ZEC Disbursed"]),
+      rate: number(row["ZEC/USD"]),
+    }));
+
+  const stipends = objects(raw.stipends)
+    .filter((row) => date(row.Date))
+    .map((row) => ({
+      date: iso(row.Date),
+      recipient: String(
+        row.Member ||
+          row.Name ||
+          row.Recipient ||
+          row["Committee Member"] ||
+          "",
+      ),
+      usd: number(row["USD Amount"]),
+      zec: number(row["ZEC Amount"] || row.ZEC),
+      rate: 0,
+    }));
+
+  for (const row of contractors) {
+    if (row.date) {
+      payouts.push({
+        date: row.date,
+        amount: row.usd,
+        kind: "other",
+        name: row.recipient,
+        project: row.project,
+      });
+    }
+  }
+  for (const row of stipends) {
+    payouts.push({
+      date: row.date,
+      amount: row.usd,
+      kind: "other",
+      name: row.recipient,
+      project: "Stipend",
+    });
   }
 
-  return grants.filter(
-    (g) =>
-      g.status === statusFilter &&
-      g.decisionStatus !== "rejected" &&
-      g.decisionStatus !== "discussion"
+  const budgetRows = parseBudgetSheet(workbook);
+
+  /* Every Disc. Budget payment counts as spending (not only security). */
+  for (const row of budgetRows) {
+    payouts.push({
+      date: row.date,
+      amount: row.usd,
+      kind: "other",
+      name: row.recipient,
+      project: row.project || "Discretionary budget",
+    });
+  }
+
+  const security = [
+    ...contractors
+      .filter(
+        (row) =>
+          SECURITY_TEXT.test(`${row.project} ${row.recipient}`) &&
+          !NOTES_TEXT.test(row.project),
+      )
+      .map((row) => ({
+        ...row,
+        type: securityType(`${row.project} ${row.recipient}`),
+      })),
+    ...budgetRows.filter((row) => row.match),
+  ].map(({ match, ...row }) => row);
+
+  const categories = {};
+  for (const row of raw.funds.slice(2)) {
+    const label = String(row[14] || "").trim();
+    const amount = number(row[15]);
+    if (label && norm(label) !== "total" && amount > 0) {
+      categories[label] = (categories[label] || 0) + amount;
+    }
+  }
+
+  const headerIndex = raw.funds.findIndex((row) => {
+    const text = norm(row.join(" "));
+    return text.includes("recipient") && text.includes("paid out");
+  });
+  const recipientTotals = new Map();
+  if (headerIndex >= 0) {
+    for (const row of objects(raw.funds, headerIndex)) {
+      const keys = Object.keys(row);
+      const recipientKey = keys.find((key) => /recipient/i.test(key));
+      const paidKey = keys.find((key) => /paid\s*out/i.test(key));
+      const futureKey = keys.find((key) => /future\s*milestones/i.test(key));
+      const name = String(row[recipientKey] || "").trim();
+      if (!name || /\btotal\b/i.test(name)) continue;
+      const current = recipientTotals.get(name) || { paid: 0, future: 0 };
+      current.paid += number(row[paidKey]);
+      current.future += number(row[futureKey]);
+      recipientTotals.set(name, current);
+    }
+  }
+  const recipients = [...recipientTotals]
+    .map(([name, v]) => ({ name, ...v, total: v.paid + v.future }))
+    .filter((row) => row.total > 0);
+
+  const get = (label) =>
+    raw.dashboard.find((row) => norm(row[0]).includes(norm(label)))?.[1];
+
+  return {
+    fetched: new Date().toISOString(),
+    sourceTime: iso(get("Block time (UTC)")),
+    treasury: {
+      price: number(get("ZECUSD price")),
+      zec: number(get("Current ZEC balance")),
+      usd: number(get("Current USD balance")),
+      liabilities: Math.abs(number(get("Future grant liabilities"))),
+    },
+    grants,
+    approvals,
+    totals,
+    payouts,
+    categories,
+    recipients,
+    contractors,
+    stipends,
+    security,
+    liquidity: raw.liquidity,
+  };
+}
+
+/* ========================================================================
+ * Events sheet (separate published spreadsheet)
+ * ===================================================================== */
+function parseEventDate(text) {
+  const match = String(text).match(/([A-Za-z]{3,})\.?\s*(\d{1,2})?(?!\d)/);
+  if (!match) return null;
+  const month = MONTH_NAMES.indexOf(match[1].slice(0, 3).toLowerCase());
+  if (month < 0) return null;
+  const year =
+    Number(String(text).match(/\b(20\d{2})\b/)?.[1]) ||
+    new Date().getFullYear();
+  return new Date(year, month, Number(match[2]) || 1).toISOString();
+}
+
+function eventType(text) {
+  const t = norm(text);
+  if (!t || t === "-" || /^no\b/.test(t)) return "Other";
+  const found = [
+    ["Grant", t.indexOf("grant")],
+    ["Sponsorship", t.indexOf("sponsor")],
+    ["Reimbursement", t.indexOf("reimburs")],
+  ]
+    .filter(([, index]) => index >= 0)
+    .sort((a, b) => a[1] - b[1]);
+  return found.length ? found[0][0] : "Other";
+}
+
+function parseEvents(workbook) {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) return [];
+  const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: true,
+    blankrows: true,
+    defval: "",
+  });
+  const headerIndex = rows.findIndex((row) =>
+    norm(row.join(" ")).includes("event name"),
+  );
+  if (headerIndex < 0) return [];
+  const out = [];
+  for (let i = headerIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const name = String(row[1] || "").trim();
+    const first = norm(row[0]);
+    if (!name || /^total|count/.test(first)) continue;
+    const r = range.s.r + i;
+    const dateCell = sheet[XLSX.utils.encode_cell({ r, c: 0 })];
+    const nameCell = sheet[XLSX.utils.encode_cell({ r, c: 1 })];
+    const typeText = String(row[5] || "").trim();
+    const rawDate = row[0];
+    const start =
+      typeof rawDate === "number" ? iso(rawDate) : parseEventDate(rawDate);
+    const status = norm(row[3]);
+    out.push({
+      date: start,
+      dateLabel: String(dateCell?.w || rawDate || "").trim(),
+      name,
+      url: safeURL(nameCell?.l?.Target),
+      location: String(row[2] || "").trim(),
+      status: /done/.test(status)
+        ? "done"
+        : /soon/.test(status)
+          ? "soon"
+          : "upcoming",
+      usd: number(row[4]),
+      zec: 0,
+      typeText,
+      type: eventType(typeText),
+    });
+  }
+  return out;
+}
+
+async function loadEvents() {
+  if (eventsPromise) return eventsPromise;
+  eventsPromise = (async () => {
+    try {
+      const [, response] = await Promise.all([
+        loadXLSX(),
+        fetch(EVENTS_URL, { cache: "no-store" }),
+      ]);
+      if (!response.ok) {
+        throw new Error(`Events request failed (${response.status}).`);
+      }
+      const workbook = XLSX.read(await response.arrayBuffer(), {
+        type: "array",
+      });
+      const parsed = parseEvents(workbook);
+      if (!parsed.length) throw new Error("No events found in the sheet.");
+      events = parsed;
+      writeCache(EVENTS_KEY, parsed);
+      renderedPages.delete("events");
+      if (activePage === "events") renderActivePage();
+    } catch (error) {
+      console.error(error);
+      if (!events && activePage === "events") {
+        $("eventsContent").innerHTML = `<div class="card">
+          Could not load events. ${escapeHTML(error.message)}</div>`;
+      }
+    } finally {
+      eventsPromise = null;
+    }
+  })();
+  return eventsPromise;
+}
+
+/* ========================================================================
+ * Data lifecycle: show cache immediately; refresh stale data once.
+ * ===================================================================== */
+async function refreshData() {
+  if (refreshing) return refreshing;
+  $("refreshButton").disabled = true;
+  $("dataStatus").textContent = data
+    ? "Showing cached data · Checking for updates…"
+    : "Downloading spreadsheet…";
+  loadEvents();
+
+  refreshing = (async () => {
+    try {
+      const [, response] = await Promise.all([
+        loadXLSX(),
+        fetch(XLSX_URL, { cache: "no-store" }),
+      ]);
+      if (!response.ok) {
+        throw new Error(`Spreadsheet request failed (${response.status}).`);
+      }
+      const workbook = XLSX.read(await response.arrayBuffer(), {
+        type: "array",
+      });
+      data = buildData(workbook);
+      writeCache(CACHE_KEY, data);
+      renderedPages.clear();
+      renderActivePage();
+      updateStatus();
+      openGrantFromHash();
+    } catch (error) {
+      console.error(error);
+      $("dataStatus").textContent = data
+        ? `Update failed · Showing saved data from ${fmtDate(data.fetched)}.`
+        : `${error.message} Use Refresh to try again.`;
+      if (!data) {
+        document.querySelectorAll(".skeleton-card").forEach((element) => {
+          element.classList.remove("skeleton-card");
+          element.textContent = "Data unavailable. Please retry.";
+        });
+      }
+    } finally {
+      refreshing = null;
+      $("refreshButton").disabled = false;
+    }
+  })();
+  return refreshing;
+}
+
+function updateStatus() {
+  if (!data) return;
+  const source = data.sourceTime
+    ? `Source timestamp: ${date(data.sourceTime).toLocaleString()} · `
+    : "";
+  $("dataStatus").textContent =
+    source + `Downloaded: ${date(data.fetched).toLocaleString()}`;
+}
+
+/* ========================================================================
+ * Dates, comparisons, and monthly series
+ * ===================================================================== */
+function sumBetween(records, start, end) {
+  return records.reduce((sum, record) => {
+    const d = date(record.date);
+    return d && d >= start && d < end ? sum + record.amount : sum;
+  }, 0);
+}
+
+function countBetween(records, start, end) {
+  return records.filter((record) => {
+    const d = date(record.date);
+    return d && d >= start && d < end;
+  }).length;
+}
+
+function months(count = 12) {
+  const now = new Date();
+  return Array.from({ length: count }, (_, index) =>
+    monthKey(new Date(now.getFullYear(), now.getMonth() - count + index + 1)),
   );
 }
 
-function filterByBudgetSet(grants, budgetFilter) {
-  switch (budgetFilter) {
-    case "small":
-      return grants.filter((g) => g.totalAmount < 50000);
-    case "medium":
-      return grants.filter((g) => g.totalAmount >= 50000 && g.totalAmount <= 200000);
-    case "large":
-      return grants.filter((g) => g.totalAmount > 200000);
-    default:
-      return grants;
+function monthly(records, keys, value = "amount") {
+  const totals = new Map(keys.map((key) => [key, 0]));
+  for (const record of records) {
+    const key = monthKey(record.date);
+    if (totals.has(key)) {
+      totals.set(key, totals.get(key) + (value ? record[value] || 0 : 1));
+    }
   }
+  return keys.map((key) => totals.get(key));
 }
 
-function filterByCategorySet(grants, categoryFilter) {
-  if (categoryFilter === "all") return grants;
-  const catNorm = categoryFilter.toLowerCase();
-  return grants.filter((g) => (g.category || "").toLowerCase() === catNorm);
-}
-
-function filterGrantsBySearch(query) {
-  if (!allGrants.length) return;
-
-  let result = [...allGrants];
-
-  if (query) {
-    result = result.filter((grant) => {
-      const cat = (grant.category || "").toLowerCase();
-      return (
-        grant.project.toLowerCase().includes(query) ||
-        grant.grantee.toLowerCase().includes(query) ||
-        cat.includes(query)
-      );
-    });
+function changeBadge(current, previous, label) {
+  if (!previous) {
+    return `<span class="badge">${current ? "New activity" : "No change"}
+      · nothing in ${escapeHTML(label)}</span>`;
   }
-
-  result = filterByStatusSet(result, currentStatusFilter);
-  result = filterByBudgetSet(result, currentBudgetFilter);
-  result = filterByCategorySet(result, currentCategoryFilter);
-
-  filteredGrants = result;
-  sortGrants();
-  updateURLWithFilters();
+  const percent = ((current - previous) / previous) * 100;
+  return `<span class="badge">${percent >= 0 ? "▲" : "▼"}
+    ${Math.abs(percent).toFixed(0)}% ${percent >= 0 ? "more" : "less"}
+    than ${escapeHTML(label)}</span>`;
 }
 
-function applyFilters() {
-  let result = [...allGrants];
-  result = filterByStatusSet(result, currentStatusFilter);
-  result = filterByBudgetSet(result, currentBudgetFilter);
-  result = filterByCategorySet(result, currentCategoryFilter);
-
-  filteredGrants = result;
-  sortGrants();
-  updateURLWithFilters();
+function bar(parts) {
+  const total = parts.reduce((sum, item) => sum + Math.max(item.value, 0), 0);
+  return `<div class="segment-bar" aria-hidden="true">
+    ${parts
+      .map(
+        (item) => `<span class="${item.className}" style="width:${
+          total ? (Math.max(item.value, 0) / total) * 100 : 0
+        }%"></span>`,
+      )
+      .join("")}
+  </div>`;
 }
 
-/* ===== Category Filters ===== */
-function setupCategoryFilters() {
-  const container = document.getElementById("categoryFilters");
-  if (!container) return;
+const stat = (label, value) =>
+  `<div class="stat-row"><span>${label}</span><strong>${value}</strong></div>`;
 
-  const cats = Array.from(
-    new Set(
-      allGrants
-        .map((g) => (g.category || "").replace(/\u00A0/g, " ").trim())
-        .filter((c) => c)
-    )
-  ).sort((a, b) => a.localeCompare(b));
+function nextMilestone(grant) {
+  return grant.milestones
+    .filter((item) => !item.paid)
+    .sort((a, b) => {
+      const da = date(a.estimate || a.due);
+      const db = date(b.estimate || b.due);
+      return (da ? +da : Infinity) - (db ? +db : Infinity);
+    })[0];
+}
 
-  const base = `<button class="filter-tab ${
-    currentCategoryFilter === "all" ? "active" : ""
-  }" data-cat="all">All Categories</button>`;
+function isOverdue(item) {
+  if (!item || item.paid) return false;
+  const due = date(item.estimate || item.due);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return due && due < today;
+}
 
-  const pills = cats
-    .map(
-      (c) =>
-        `<button class="filter-tab ${
-          currentCategoryFilter === c ? "active" : ""
-        }" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`
-    )
-    .join("");
+/* ========================================================================
+ * Navigation: native hash history
+ * ===================================================================== */
+const legacyRoutes = { auditpayments: "security", payments: "dashboard" };
 
-  container.innerHTML = base + pills;
+const pageTitles = {
+  dashboard: "Overview",
+  grants: "Grants",
+  security: "Security",
+  events: "Events",
+  stipends: "Stipends",
+  notetaker: "Notetaker",
+  liquidity: "Liquidity",
+};
 
-  container.querySelectorAll(".filter-tab").forEach((pill) => {
-    pill.addEventListener("click", () => {
-      container
-        .querySelectorAll(".filter-tab")
-        .forEach((p) => p.classList.remove("active"));
-      pill.classList.add("active");
-      currentCategoryFilter = pill.dataset.cat || "all";
-      applyFilters();
-    });
+const pageTargets = {
+  grants: "grantsContainer",
+  security: "securityContent",
+  stipends: "stipendsContent",
+  notetaker: "notetakerContent",
+  liquidity: "liquidityContent",
+  events: "eventsContent",
+};
+
+function route() {
+  const [rawPage, query = ""] = location.hash.slice(1).split("?");
+  const page = legacyRoutes[rawPage] || rawPage;
+  activePage = $(page)?.classList.contains("page") ? page : "dashboard";
+  document.querySelectorAll(".page").forEach((element) => {
+    element.hidden = element.id !== activePage;
   });
+  document.querySelectorAll("[data-page]").forEach((element) => {
+    if (element.dataset.page === activePage) {
+      element.setAttribute("aria-current", "page");
+    } else {
+      element.removeAttribute("aria-current");
+    }
+  });
+  document.title = `${pageTitles[activePage]} · Zcash Community Grants`;
+
+  if (activePage === "grants") {
+    const params = new URLSearchParams(query);
+    for (const [name, id] of [
+      ["status", "grantStatus"],
+      ["budget", "grantBudget"],
+      ["sort", "grantSort"],
+    ]) {
+      const value = params.get(name);
+      if (value && [...$(id).options].some((o) => o.value === value)) {
+        $(id).value = value;
+      }
+    }
+  }
+  syncDropdowns();
+  if ($("grantDialog").open && !new URLSearchParams(query).has("grant")) {
+    modalRequest++;
+    $("grantDialog").close();
+  }
+  renderActivePage();
+  openGrantFromHash();
 }
 
-/* ===== Render Grants ===== */
-function renderGrants(grants) {
-  const container = document.getElementById("grantsContainer");
-  if (!container) return;
-
-  updateGrantsCounter(grants.length, allGrants.length);
-
-  if (!grants.length) {
-    container.innerHTML =
-      '<div class="loading-placeholder">No grants found</div>';
+function renderActivePage() {
+  /* Events come from their own sheet and do not need the main data. */
+  if (activePage === "events") {
+    if (renderedPages.has("events")) {
+      for (const chart of charts.values()) chart.resize();
+    } else if (events) {
+      renderTable("events");
+      renderedPages.add("events");
+    } else {
+      $("eventsContent").innerHTML = '<div class="card skeleton-card"></div>';
+    }
     return;
   }
-
-  container.innerHTML = grants
-    .map((grant) => {
-      const progressPercent =
-        grant.totalMilestones > 0
-          ? (grant.completedMilestones / grant.totalMilestones) * 100
-          : 0;
-
-      const pctPaid =
-        grant.totalAmount > 0
-          ? Math.round((grant.paidAmount / grant.totalAmount) * 100)
-          : 0;
-
-      const decisionLabel =
-        grant.decisionStatus === "discussion"
-          ? "Discussion Required"
-          : grant.decisionStatus === "rejected"
-          ? "Declined"
-          : null;
-
-      const openedPill = grant.submissionDate
-        ? `<span class="meta-pill meta-pill-opened">
-             Opened: ${new Date(grant.submissionDate).toLocaleDateString()}
-           </span>`
-        : "";
-
-      const categoryPill = grant.category
-        ? `<span class="category-pill">${escapeHtml(grant.category)}</span>`
-        : "";
-
-      const statusPill =
-        grant.decisionStatus !== "rejected" &&
-        grant.decisionStatus !== "discussion"
-          ? `<span class="grant-status ${grant.status}">
-               ${grant.status.replace("-", " ").toUpperCase()}
-               (${grant.completedMilestones}/${grant.totalMilestones})
-             </span>`
-          : "";
-
-      return `
-        <div class="grant-card ${grant.status}" onclick="showGrantDetails('${escapeHtml(
-          grant.project
-        )}', '${escapeHtml(grant.grantee)}')">
-          <div class="grant-title">${escapeHtml(grant.project)}</div>
-          <div class="grant-grantee">${escapeHtml(grant.grantee)}</div>
-
-          <div class="meta-pill-row">
-            ${openedPill}
-            ${categoryPill}
-            ${statusPill}
-          </div>
-
-          <div class="grant-amount">${formatUSD(grant.totalAmount)}</div>
-
-          <div class="progress-bar">
-            <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
-          </div>
-
-          <div class="grant-paid-line">
-            ${formatUSD(grant.paidAmount)} paid (${pctPaid}%)
-          </div>
-
-          ${
-            decisionLabel
-              ? `<div class="grant-status ${
-                  grant.decisionStatus === "discussion"
-                    ? "discussion"
-                    : "declined"
-                }">Decision: ${decisionLabel.toUpperCase()}</div>`
-              : ""
-          }
-
-          <div class="grant-plus-btn"><span>+</span></div>
-        </div>
-      `;
-    })
-    .join("");
-}
-
-function updateGrantsCounter(filtered, total) {
-  const counter = document.getElementById("grantsCounter");
-  if (!counter) return;
-
-  const percent = total > 0 ? ((filtered / total) * 100).toFixed(1) : 0;
-  counter.textContent = `Showing ${filtered} of ${total} grants (${percent}%)`;
-}
-
-/* ===== Grant Details Modal (with GitHub) ===== */
-async function findGitHubIssueByTitle(title) {
-  if (githubIssueCache[title] !== undefined) return githubIssueCache[title];
-
-  try {
-    const searchGitHub = async (queryTitle) => {
-      const query = encodeURIComponent(
-        `"${queryTitle}" repo:ZcashCommunityGrants/zcashcommunitygrants`
-      );
-      const url = `https://api.github.com/search/issues?q=${query}`;
-      const res = await fetch(url, {
-        headers: { Accept: "application/vnd.github.v3+json" },
-      });
-      if (!res.ok) throw new Error(`GitHub search failed: ${res.status}`);
-
-      const data = await res.json();
-      if (data.items && data.items.length > 0) {
-        const normalizedGrantTitle = queryTitle.trim().toLowerCase();
-        const exactMatch = data.items.find(
-          (issue) => issue.title.trim().toLowerCase() === normalizedGrantTitle
-        );
-        return exactMatch || data.items[0];
-      }
-      return null;
-    };
-
-    let issue = await searchGitHub(title);
-    if (!issue) issue = await searchGitHub(`Grant Application - ${title}`);
-
-    githubIssueCache[title] = issue;
-    return issue;
-  } catch (err) {
-    console.error("Error searching GitHub issue:", err);
-    githubIssueCache[title] = null;
-    return null;
+  if (!data) {
+    const target = $(pageTargets[activePage] || "");
+    if (target) target.innerHTML = '<div class="card skeleton-card"></div>';
+    if (activePage === "liquidity") renderLiquidity();
+    return;
   }
-}
-
-async function fetchGitHubIssueBody(issueNumber) {
-  try {
-    const url = `https://api.github.com/repos/ZcashCommunityGrants/zcashcommunitygrants/issues/${issueNumber}`;
-    const res = await fetch(url, {
-      headers: { Accept: "application/vnd.github.v3+json" },
-    });
-    if (!res.ok) throw new Error(`GitHub issue fetch failed: ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.error("Error fetching GitHub issue body:", err);
-    return null;
+  if (activePage === "grants") {
+    renderGrants();
+    return;
   }
-}
-
-function extractProjectSummary(markdown) {
-  const lines = markdown.split("\n");
-
-  function findSection(keyword) {
-    const regexHeading = new RegExp(`^#{2,}\\s*${keyword}.*$`, "i");
-    const regexBold = new RegExp(`^\\*\\*\\s*${keyword}.*\\*\\*$`, "i");
-
-    const startIndex = lines.findIndex((line) => {
-      const clean = line.trim();
-      return regexHeading.test(clean) || regexBold.test(clean);
-    });
-
-    if (startIndex === -1) return null;
-
-    const sectionLines = [];
-    for (let i = startIndex + 1; i < lines.length; i++) {
-      if (/^#{1,6}\s+/.test(lines[i]) || /^\*\*.+\*\*$/.test(lines[i].trim())) {
-        break;
-      }
-      sectionLines.push(lines[i]);
-    }
-
-    return sectionLines.join("\n").trim();
+  if (renderedPages.has(activePage)) {
+    for (const chart of charts.values()) chart.resize();
+    return;
   }
-
-  let summary = findSection("project summary");
-  if (!summary) summary = findSection("description");
-  return summary || null;
-}
-
-async function showGrantDetails(project, grantee) {
-  const grant = allGrants.find(
-    (g) => g.project === project && g.grantee === grantee
-  );
-  if (!grant) return;
-
-  const grantId = encodeGrantId(project, grantee);
-  const currentHash = window.location.hash;
-  const params = new URLSearchParams(currentHash.split("?")[1] || "");
-  params.set("grant", grantId);
-  history.replaceState(
-    { page: "grants", grant: grantId },
-    "",
-    `#grants?${params.toString()}`
-  );
-
-  const progressPercent =
-    grant.totalMilestones > 0
-      ? (grant.completedMilestones / grant.totalMilestones) * 100
-      : 0;
-
-  const paidMilestones = grant.milestones.filter((m) => !!m.paidDate);
-  const futureMilestones = grant.milestones.filter((m) => !m.paidDate);
-
-  const renderPaid = (m, i) => `
-    <div class="milestone-item">
-      <span>#${i + 1} — ${formatUSD(m.amount)}</span>
-      <span style="color:var(--success);">Paid ${fmtDateCell(m.paidDate)}</span>
-    </div>
-  `;
-
-  const renderFuture = (m, i) => {
-    const est = fmtDateCell(m.estimate);
-    const due = fmtDateCell(m.dueDate);
-    const label = est || due ? (est ? `Est. ${est}` : `Due ${due}`) : "Date TBA";
-
-    return `
-      <div class="milestone-item">
-        <span>#${i + 1} — ${formatUSD(m.amount)}</span>
-        <span style="color: var(--text-tertiary);">${label}</span>
-      </div>
-    `;
+  const renderers = {
+    dashboard: renderOverview,
+    security: renderSecurity,
+    stipends: () => renderTable("stipends"),
+    notetaker: () => renderTable("notetaker"),
+    liquidity: renderLiquidity,
   };
-
-  const content = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
-      <h2 style="font-size:1.25rem;font-weight:700;margin:0;">
-        ${escapeHtml(project)}
-      </h2>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-        <button class="github-btn" id="shareGrantBtn" title="Copy link to this grant">
-          🔗 Share
-        </button>
-        <span id="forumBtnSlot"></span>
-        <span id="githubBtnSlot"></span>
-      </div>
-    </div>
-
-    <div class="progress-bar" style="margin: 12px 0;">
-      <div class="progress-fill ${grant.status}" style="width: ${progressPercent}%;"></div>
-    </div>
-
-    <div style="color:var(--text-secondary);margin-bottom:1rem;">
-      ${escapeHtml(grantee)}
-    </div>
-
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;font-size:0.85rem;">
-      ${
-        grant.submissionDate
-          ? `<span><strong>Opened:</strong> ${new Date(
-              grant.submissionDate
-            ).toLocaleDateString()}</span>`
-          : ""
-      }
-      <span><strong>Budget:</strong> ${formatUSD(grant.paidAmount)} / ${formatUSD(
-    grant.totalAmount
-  )}</span>
-      ${
-        grant.lastPaidDate
-          ? `<span><strong>Last Payment:</strong> ${fmtDateCell(
-              grant.lastPaidDate
-            )}</span>`
-          : ""
-      }
-      <span><strong>Milestones:</strong> ${grant.completedMilestones}/${
-    grant.totalMilestones
-  }</span>
-    </div>
-
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
-      ${
-        grant.category
-          ? `<span class="category-pill">${escapeHtml(grant.category)}</span>`
-          : ""
-      }
-      ${
-        grant.decisionStatus !== "rejected" &&
-        grant.decisionStatus !== "discussion"
-          ? `<span class="grant-status ${grant.status}">
-               ${grant.status.replace("-", " ").toUpperCase()}
-             </span>`
-          : `<span class="grant-status ${
-              grant.decisionStatus === "discussion" ? "discussion" : "declined"
-            }">
-               ${
-                 grant.decisionStatus === "discussion"
-                   ? "DISCUSSION REQUIRED"
-                   : "DECLINED"
-               }
-             </span>`
-      }
-    </div>
-
-    <div id="githubSection" style="margin-bottom:1.5rem;">
-      <div style="color:var(--text-tertiary);font-size:0.85rem;">
-        Loading GitHub details...
-      </div>
-    </div>
-
-    ${
-      paidMilestones.length
-        ? `
-      <h3 style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.75rem;">
-        Paid Milestones
-      </h3>
-      <div class="milestone-list">
-        ${paidMilestones.map((m, idx) => renderPaid(m, idx)).join("")}
-      </div>
-    `
-        : ""
-    }
-
-    ${
-      futureMilestones.length
-        ? `
-      <h3 style="font-size:0.9rem;color:var(--text-secondary);margin:1rem 0 0.75rem;">
-        Future Milestones
-      </h3>
-      <div class="milestone-list">
-        ${futureMilestones
-          .map((m, idx) => renderFuture(m, idx + paidMilestones.length))
-          .join("")}
-      </div>
-    `
-        : ""
-    }
-  `;
-
-  openModal(content);
-
-  document.getElementById("shareGrantBtn")?.addEventListener("click", () => {
-    navigator.clipboard.writeText(window.location.href).then(() => {
-      const btn = document.getElementById("shareGrantBtn");
-      if (!btn) return;
-      btn.innerHTML = "✓ Copied!";
-      setTimeout(() => {
-        btn.innerHTML = "🔗 Share";
-      }, 2000);
-    });
-  });
-
-  const issue = await findGitHubIssueByTitle(grant.project);
-  const githubContainer = document.getElementById("githubSection");
-  const btnSlot = document.getElementById("githubBtnSlot");
-  const forumSlot = document.getElementById("forumBtnSlot");
-
-  if (forumSlot && grant.forumLink) {
-    forumSlot.innerHTML = `
-      <a class="github-btn" href="${grant.forumLink}" target="_blank" rel="noopener">
-        Forum
-      </a>
-    `;
-  }
-
-  if (issue) {
-    const issueData = await fetchGitHubIssueBody(issue.number);
-
-    if (btnSlot && issueData?.html_url) {
-      btnSlot.innerHTML = `
-        <a class="github-btn github-btn--accent" href="${issueData.html_url}" target="_blank" rel="noopener">
-          <svg viewBox="0 0 16 16" style="width:16px;height:16px;fill:currentColor;">
-            <path d="M8 .2a8 8 0 00-2.53 15.6c.4.07.55-.17.55-.38 0-.18-.01-.78-.01-1.42-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.12-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.58.82-2.14-.08-.2-.36-1.01.08-2.1 0 0 .67-.21 2.2.82a7.6 7.6 0 012 0c1.53-1.03 2.2-.82 2.2-.82.44 1.09.16 1.9.08 2.1.51.56.82 1.27.82 2.14 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.22 0 .21.15.46.55.38A8 8 0 008 .2z"></path>
-          </svg>
-          GitHub
-        </a>
-      `;
-    }
-
-    if (issueData?.body && githubContainer) {
-      const summary = extractProjectSummary(issueData.body);
-      if (summary) {
-        const maxChars = 800;
-        const plain = summary.replace(/[#*`>\[\]()]/g, "").trim();
-        const truncated =
-          plain.length > maxChars ? `${plain.slice(0, maxChars)}...` : plain;
-
-        githubContainer.innerHTML = `
-          <h3 style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.5rem;">
-            Project Summary
-          </h3>
-          <p style="color:var(--text-secondary);font-size:0.85rem;line-height:1.6;">
-            ${escapeHtml(truncated)}
-          </p>
-          ${
-            plain.length > maxChars
-              ? `<a href="${issueData.html_url}" target="_blank" style="color:var(--accent-secondary);font-size:0.85rem;">
-                   Read more on GitHub →
-                 </a>`
-              : ""
-          }
-        `;
-      } else {
-        githubContainer.innerHTML = `
-          <div style="color:var(--text-tertiary);font-size:0.85rem;">
-            No project summary found.
-          </div>
-        `;
-      }
-    } else if (githubContainer) {
-      githubContainer.innerHTML = `
-        <div style="color:var(--text-tertiary);font-size:0.85rem;">
-          No GitHub details found.
-        </div>
-      `;
-    }
-  } else if (githubContainer) {
-    githubContainer.innerHTML = `
-      <div style="color:var(--text-tertiary);font-size:0.85rem;">
-        No GitHub issue found.
-      </div>
-    `;
-  }
+  renderers[activePage]?.();
+  renderedPages.add(activePage);
 }
 
-/* ===== Modal Functions ===== */
-function openModal(content) {
-  const modalBody = document.getElementById("modalBody");
-  const modalOverlay = document.getElementById("modalOverlay");
-
-  if (modalBody) modalBody.innerHTML = content;
-  if (modalOverlay) modalOverlay.classList.add("active");
-  document.body.style.overflow = "hidden";
-}
-
-function closeModal() {
-  const modalOverlay = document.getElementById("modalOverlay");
-  if (modalOverlay) modalOverlay.classList.remove("active");
-  document.body.style.overflow = "auto";
-
-  if (window.location.hash.includes("grant=")) {
-    const hash = window.location.hash;
-    const params = new URLSearchParams(hash.split("?")[1] || "");
-    params.delete("grant");
-
-    const newQuery = params.toString();
-    const newHash = newQuery ? `#grants?${newQuery}` : "#grants";
-    history.replaceState({ page: "grants" }, "", newHash);
-  }
-}
-
-function openGrantFromURL() {
-  if (!pendingGrantToOpen) {
-    const hash = window.location.hash;
-    if (!hash.includes("grant=")) return false;
-
-    const params = new URLSearchParams(hash.split("?")[1]);
-    const grantId = params.get("grant");
-    if (!grantId) return false;
-
-    pendingGrantToOpen = decodeGrantId(grantId);
-  }
-
-  if (!pendingGrantToOpen) return false;
-
-  const grant = allGrants.find(
-    (g) =>
-      g.project === pendingGrantToOpen.project &&
-      g.grantee === pendingGrantToOpen.grantee
+/* ========================================================================
+ * Overview
+ * ===================================================================== */
+function monthLabel(key, long = false) {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString(
+    undefined,
+    long ? { month: "long", year: "numeric" } : { month: "short" },
   );
-
-  if (grant) {
-    pendingGrantToOpen = null;
-    showGrantDetails(grant.project, grant.grantee);
-    return true;
-  }
-
-  return false;
 }
 
-/* ===== Payments ===== */
-function getPaidOutDataForChart() {
-  if (!appData) return [];
-  return applyAmountFilter(appData.paidOutOriginal, currentPaidOutAmountFilter);
+function miniChartHTML(id, title, keys, note) {
+  return `<div class="spark-title">${title}
+      <span class="muted">· ${monthLabel(keys[0], true)} – ${monthLabel(keys.at(-1), true)}</span></div>
+    <div class="mini-chart"><canvas id="${id}"></canvas></div>
+    <p class="spark-caption">${note}</p>`;
 }
 
-function renderPaidOutChart(data) {
-  const ctx = document.getElementById("paidOutChart");
-  if (!ctx) return;
-  if (ctx.chart) ctx.chart.destroy();
-
-  const titleEl = document.getElementById("paidOutTitle");
-  if (titleEl) titleEl.textContent = "Total Paid Out";
-
-  ctx.parentElement.style.height = `${Math.max(200, data.length * 30)}px`;
-
-  const totalPaid = data.reduce((sum, d) => sum + (d.amount || 0), 0);
-
-  ctx.chart = new Chart(ctx, {
+function drawMiniChart(id, keys, values, label, money = true) {
+  const colors = chartColors();
+  const last = keys.length - 1;
+  makeChart(id, {
     type: "bar",
     data: {
-      labels: data.map((d) => d.grantee),
+      labels: keys.map((k) => monthLabel(k)),
       datasets: [
         {
-          label: "Total Paid Out (USD)",
-          data: data.map((d) => d.amount),
-          backgroundColor: "rgba(243, 166, 34, 0.7)",
-          borderColor: "#f3a622",
-          borderWidth: 1,
+          label,
+          data: values,
+          backgroundColor: values.map((_, i) =>
+            i === last ? colors.gray : colors.amber,
+          ),
+          borderRadius: 3,
         },
       ],
     },
     options: {
-      ...getChartOptions(),
-      indexAxis: "y",
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label(context) {
-              const value = context.parsed.x || 0;
-              const pct =
-                totalPaid > 0 ? ((value / totalPaid) * 100).toFixed(1) : "0.0";
-              return `${formatUSD(value)} (${pct}%)`;
-            },
+            title: (items) =>
+              monthLabel(keys[items[0].dataIndex], true) +
+              (items[0].dataIndex === last ? " (so far)" : ""),
+            label: (c) => `${label}: ${money ? usd(c.raw) : c.raw}`,
           },
         },
       },
       scales: {
-        x: {
-          ...getChartOptions().scales.x,
-          title: { display: true, text: "USD" },
-          ticks: {
-            ...getChartOptions().scales.x.ticks,
-            callback: (v) => formatUSD(v),
-          },
-        },
+        x: { ticks: { autoSkip: false, maxRotation: 0, font: { size: 9 } } },
+        y: { display: false },
       },
     },
   });
 }
 
-function renderFutureChart(data) {
-  const ctx = document.getElementById("futureMilestonesChart");
-  if (!ctx) return;
-  if (ctx.chart) ctx.chart.destroy();
+function renderOverview() {
+  const now = new Date();
+  const end = new Date(+now + 1);
+  const start30 = new Date(+now - 30 * DAY);
+  const previous30 = new Date(+now - 60 * DAY);
+  const start12 = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+  const grantPayoutRecords = data.payouts.filter((p) => p.kind === "grant");
+  const currentPayouts = sumBetween(data.payouts, start30, end);
+  const previousPayouts = sumBetween(data.payouts, previous30, start30);
+  const grantPayouts = sumBetween(grantPayoutRecords, start30, end);
+  const grantCount = countBetween(grantPayoutRecords, start30, end);
+  const burn = sumBetween(data.payouts, start12, end) / 12;
+  const t = data.treasury;
+  const zecValue = t.zec * t.price;
+  const treasury = zecValue + t.usd;
+  const income = DAILY_INFLOW_ZEC * 30 * t.price;
+  const free = treasury - t.liabilities;
+  const committed = treasury > 0 ? (t.liabilities / treasury) * 100 : 0;
+  const approved = data.grants.filter((g) => g.decision === "approved");
+  const complete = approved.filter((g) => g.status === "completed").length;
+  const active = approved.filter((g) => g.status === "in-progress").length;
+  const review = approved.length - complete - active;
+  const overdueGrants = approved.filter((g) => g.milestones.some(isOverdue)).length;
+  const yStart = yearStart();
+  const previousYearStart = new Date(now.getFullYear() - 1, 0, 1);
+  const previousYearEnd = new Date(
+    now.getFullYear() - 1, now.getMonth(), now.getDate(),
+    now.getHours(), now.getMinutes(),
+  );
+  const currentApprovals = data.approvals.filter(
+    (a) => date(a.date) >= yStart && date(a.date) <= now,
+  );
+  const previousApprovals = data.approvals.filter(
+    (a) => date(a.date) >= previousYearStart && date(a.date) <= previousYearEnd,
+  );
+  const approvedBudget = currentApprovals.reduce(
+    (sum, a) => sum + (data.totals[norm(a.project)] || 0), 0,
+  );
+  const ytdPaid = sumBetween(data.payouts, yStart, end);
+  const keys = months();
 
-  ctx.parentElement.style.height = `${Math.max(200, data.length * 30)}px`;
+  $("overviewMetrics").innerHTML = `
+    <article class="card treasury-card">
+      <div class="metric-label">Total treasury value</div>
+      <div class="metric-value">${usd(treasury)}</div>
+      <p class="metric-subtitle">ZEC at ${usd(t.price)} + USD stables</p>
+      ${bar([
+        { value: zecValue, className: "bar-yellow" },
+        { value: t.usd, className: "bar-blue" },
+      ])}
+      ${stat(zec(t.zec), usd(zecValue))}
+      ${stat("USD stables", usd(t.usd))}
+      <div class="divider"></div>
+      ${stat("Committed to grants", `${usd(t.liabilities)} · ${committed.toFixed(0)}%`)}
+      ${bar([
+        { value: t.liabilities, className: "bar-green" },
+        { value: Math.max(free, 0), className: "bar-muted" },
+      ])}
+      ${stat("Uncommitted treasury", usd(free))}
+      ${stat("Gross spending coverage", burn > 0 ? `~${(treasury / burn).toFixed(1)} months` : "—")}
+      <p class="spark-caption">
+        Coverage uses ${usd(burn)}/month trailing average; excludes income.
+      </p>
+    </article>
 
-  ctx.chart = new Chart(ctx, {
+    <article class="card">
+      <div class="metric-label">Payouts · last 30 days</div>
+      <div class="metric-value">${usd(currentPayouts)}</div>
+      ${changeBadge(currentPayouts, previousPayouts, `the previous 30 days (${usd(previousPayouts)})`)}
+      ${stat("Grant milestones", `${usd(grantPayouts)} · ${grantCount} paid`)}
+      ${stat("Contractors, stipends & discretionary", usd(currentPayouts - grantPayouts))}
+      ${stat("Avg grant payout", usd(grantCount ? grantPayouts / grantCount : 0))}
+      <div class="divider"></div>
+      ${stat("Est. protocol income", usd(income))}
+      ${stat("Est. net flow", usd(income - currentPayouts))}
+      ${stat("All payouts this year", usd(ytdPaid))}
+      ${miniChartHTML(
+        "miniPayouts", "Total payouts per month", keys,
+        `Hover a bar for the exact amount. Gray = current month so far.
+         Income = ${DAILY_INFLOW_ZEC} ZEC/day × 30 at current price.`,
+      )}
+    </article>
+
+    <article class="card">
+      <div class="metric-label">Approved grants · all time</div>
+      <div class="metric-value">${approved.length}</div>
+      <p class="metric-subtitle">
+        ${complete} completed · ${active} active · ${review} in review
+      </p>
+      ${bar([
+        { value: complete, className: "bar-green" },
+        { value: active, className: "bar-yellow" },
+        { value: review, className: "bar-muted" },
+      ])}
+      ${stat("Approved this year", currentApprovals.length)}
+      ${changeBadge(
+        currentApprovals.length, previousApprovals.length,
+        `the same period last year (${previousApprovals.length})`,
+      )}
+      ${stat("Matched approved budget YTD", usd(approvedBudget))}
+      ${stat("Grants with overdue milestones", overdueGrants)}
+      ${miniChartHTML(
+        "miniApprovals", "Grants approved per month", keys,
+        "Hover a bar for the count. Gray = current month so far.",
+      )}
+    </article>`;
+
+  drawMiniChart("miniPayouts", keys, monthly(data.payouts, keys), "Paid out");
+  drawMiniChart("miniApprovals", keys, monthly(data.approvals, keys, null), "Approved", false);
+  renderOverviewCharts();
+  renderPriceChart();
+  renderRecipients();
+}
+
+/* ========================================================================
+ * Charts (colors come from CSS variables, so dark mode works)
+ * ===================================================================== */
+function chartColors() {
+  const css = getComputedStyle(document.documentElement);
+  const get = (name) => css.getPropertyValue(name).trim();
+  return {
+    text: get("--muted"),
+    grid: get("--grid"),
+    amber: get("--amber"),
+    gray: get("--gray"),
+    ink: get("--ink"),
+  };
+}
+
+function makeChart(id, config) {
+  if (!window.Chart || !$(id)) return;
+  charts.get(id)?.destroy();
+  const colors = chartColors();
+  const options = config.options || {};
+  const base = {
+    x: {
+      grid: { display: false },
+      ticks: { color: colors.text, maxRotation: 0 },
+    },
+    y: {
+      beginAtZero: true,
+      grid: { color: colors.grid },
+      ticks: { color: colors.text },
+    },
+  };
+  const scales = { ...base };
+  for (const [name, value] of Object.entries(options.scales || {})) {
+    scales[name] = base[name] ? { ...base[name], ...value } : value;
+  }
+  const chart = new Chart($(id), {
+    ...config,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      color: colors.text,
+      interaction: { mode: "index", intersect: false },
+      ...options,
+      plugins: {
+        legend: {
+          labels: { color: colors.text, boxWidth: 10, boxHeight: 10 },
+        },
+        ...options.plugins,
+      },
+      scales: config.type === "doughnut" ? undefined : scales,
+    },
+  });
+  charts.set(id, chart);
+}
+
+function chartMonthKeys(records, range) {
+  const current = monthKey(new Date());
+  if (range === "12m") return months();
+  const earliest = records
+    .map((item) => monthKey(item.date))
+    .filter(Boolean)
+    .sort()[0];
+  let first = range === "ytd" ? `${new Date().getFullYear()}-01` : earliest;
+  if (!first) return months();
+  if (first < MIN_MONTH) first = MIN_MONTH;
+  const [year, month] = first.split("-").map(Number);
+  const keys = [];
+  const cursor = new Date(year, month - 1, 1);
+  while (monthKey(cursor) <= current && keys.length < 240) {
+    keys.push(monthKey(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return keys;
+}
+
+function renderOverviewCharts() {
+  const colors = chartColors();
+  const usdAxis = { ticks: { color: colors.text, callback: (v) => usd(v) } };
+  const countAxis = {
+    position: "right",
+    beginAtZero: true,
+    grid: { drawOnChartArea: false },
+    ticks: { color: colors.text, precision: 0 },
+  };
+
+  const grants = data.payouts.filter((item) => item.kind === "grant");
+  const payoutKeys = chartMonthKeys(grants, chartRanges.payout);
+  makeChart("payoutChart", {
     type: "bar",
     data: {
-      labels: data.map((d) => d.grantee),
+      labels: payoutKeys,
       datasets: [
         {
-          label: "Future Milestones (USD)",
-          data: data.map((d) => d.amount),
-          backgroundColor: "rgba(124, 176, 255, 0.7)",
-          borderColor: "#7cb0ff",
-          borderWidth: 1,
+          label: "Paid (USD)",
+          data: monthly(grants, payoutKeys),
+          backgroundColor: colors.amber,
+          borderRadius: 4,
+        },
+        {
+          type: "line",
+          label: "Milestones paid",
+          data: monthly(grants, payoutKeys, null),
+          borderColor: colors.ink,
+          backgroundColor: colors.ink,
+          yAxisID: "count",
+          tension: 0.25,
+          pointRadius: 2,
+        },
+      ],
+    },
+    options: { scales: { y: usdAxis, count: countAxis } },
+  });
+
+  const approvalKeys = chartMonthKeys(data.approvals, chartRanges.approval);
+  const budgetRecords = data.approvals.map((item) => ({
+    ...item,
+    amount: data.totals[norm(item.project)] || 0,
+  }));
+  makeChart("approvalChart", {
+    type: "bar",
+    data: {
+      labels: approvalKeys,
+      datasets: [
+        {
+          label: "Matched budget (USD)",
+          data: monthly(budgetRecords, approvalKeys),
+          backgroundColor: colors.amber,
+          borderRadius: 4,
+        },
+        {
+          type: "line",
+          label: "Approved grants",
+          data: monthly(data.approvals, approvalKeys, null),
+          borderColor: colors.ink,
+          backgroundColor: colors.ink,
+          yAxisID: "count",
+          tension: 0.25,
+          pointRadius: 2,
+        },
+      ],
+    },
+    options: { scales: { y: usdAxis, count: countAxis } },
+  });
+
+  const entries = Object.entries(data.categories).sort((a, b) => b[1] - a[1]);
+  const palette = [
+    "#f4b728",
+    "#e79032",
+    "#c66c36",
+    "#926c41",
+    "#648bb9",
+    "#22805c",
+    "#b19b63",
+    "#b789a5",
+    "#7d7c92",
+    "#d1ae7c",
+  ];
+  makeChart("categoryChart", {
+    type: "doughnut",
+    data: {
+      labels: entries.map(([name]) => name),
+      datasets: [
+        {
+          data: entries.map(([, value]) => value),
+          backgroundColor: entries.map((_, i) => palette[i % palette.length]),
+          borderWidth: 0,
+          spacing: 3,
         },
       ],
     },
     options: {
-      ...getChartOptions(),
-      indexAxis: "y",
-      plugins: { legend: { display: false } },
-      scales: {
-        x: {
-          ...getChartOptions().scales.x,
-          ticks: {
-            ...getChartOptions().scales.x.ticks,
-            callback: (v) => formatUSD(v),
-          },
+      cutout: "68%",
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: (c) => `${c.label}: ${usd(c.raw)}` },
         },
       },
     },
   });
+  const total = entries.reduce((sum, [, value]) => sum + value, 0);
+  $("categoryLegend").innerHTML = entries
+    .map(
+      ([name, value], index) => `
+      <div class="category-item">
+        <span class="dot" style="background:${palette[index % palette.length]}"></span>
+        <span>${escapeHTML(name)}</span>
+        <strong>${usd(value)} · ${total ? ((value / total) * 100).toFixed(1) : 0}%</strong>
+      </div>`,
+    )
+    .join("");
 }
 
-function setupPaidOutAmountFilters() {
-  const container = document.getElementById("paidOutFilters");
-  if (!container || container.dataset.bound === "1") return;
-
-  container.querySelectorAll(".filter-tab").forEach((pill) => {
-    pill.addEventListener("click", () => {
-      container
-        .querySelectorAll(".filter-tab")
-        .forEach((p) => p.classList.remove("active"));
-      pill.classList.add("active");
-      currentPaidOutAmountFilter = pill.dataset.range || "all";
-      renderPaidOutChart(getPaidOutDataForChart());
-    });
-  });
-
-  container.dataset.bound = "1";
-}
-
-function setupChartFilters(containerId, originalData, renderFn) {
-  const container = document.getElementById(containerId);
-  if (!container || container.dataset.bound === "1") return;
-
-  container.querySelectorAll(".filter-tab").forEach((pill) => {
-    pill.addEventListener("click", () => {
-      container
-        .querySelectorAll(".filter-tab")
-        .forEach((p) => p.classList.remove("active"));
-      pill.classList.add("active");
-
-      const range = pill.dataset.range;
-      let filtered = [...originalData];
-
-      if (range === "small") filtered = filtered.filter((d) => d.amount < 50000);
-      if (range === "medium") {
-        filtered = filtered.filter(
-          (d) => d.amount >= 50000 && d.amount <= 200000
-        );
-      }
-      if (range === "large") filtered = filtered.filter((d) => d.amount > 200000);
-
-      renderFn(filtered);
-    });
-  });
-
-  container.dataset.bound = "1";
-}
-
-async function loadPayouts() {
+async function renderPriceChart() {
   try {
-    const data = await ensureAppData();
-
-    renderPaidOutChart(getPaidOutDataForChart());
-    renderFutureChart(data.futureOriginal);
-
-    setupPaidOutAmountFilters();
-    setupChartFilters("futureFilters", data.futureOriginal, renderFutureChart);
-  } catch (error) {
-    console.error("Error loading payouts data:", error);
+    const cached = readCache(PRICE_KEY);
+    let prices = cached?.value;
+    if (!Array.isArray(prices) || Date.now() - cached.timestamp > DAY) {
+      try {
+        pricePromise ||= fetch(PRICE_URL)
+          .then((response) => {
+            if (!response.ok) throw new Error("Price API unavailable.");
+            return response.json();
+          })
+          .then((result) => {
+            if (!result.prices?.length) throw new Error("No price data.");
+            writeCache(PRICE_KEY, result.prices);
+            return result.prices;
+          })
+          .finally(() => {
+            pricePromise = null;
+          });
+        prices = await pricePromise;
+      } catch (error) {
+        if (!Array.isArray(prices)) throw error; // fall back to stale cache
+      }
+    }
+    const daily = new Map();
+    for (const [timestamp, value] of prices) {
+      daily.set(new Date(timestamp).toISOString().slice(0, 10), value);
+    }
+    const points = [...daily.entries()].sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+    const colors = chartColors();
+    makeChart("priceChart", {
+      type: "line",
+      data: {
+        labels: points.map(([day]) => day),
+        datasets: [
+          {
+            label: "ZEC/USD",
+            data: points.map(([, value]) => value),
+            borderColor: colors.amber,
+            backgroundColor: "rgba(244, 183, 40, 0.12)",
+            fill: true,
+            tension: 0.2,
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6 } },
+          y: { beginAtZero: false },
+        },
+      },
+    });
+    const first = points[0][1];
+    const last = points.at(-1)[1];
+    const percent = first ? ((last - first) / first) * 100 : 0;
+    $("priceChange").textContent =
+      `${percent >= 0 ? "▲" : "▼"} ${Math.abs(percent).toFixed(1)}% · 90d`;
+    $("priceCaption").textContent = "Daily USD prices · CoinGecko";
+  } catch {
+    $("priceCaption").textContent =
+      "Price history unavailable. CoinGecko may be rate-limiting requests.";
   }
 }
 
-/* ===== Liquidity ===== */
-async function loadLiquidity() {
-  try {
-    const data = await ensureAppData();
-    const aoa = data.liquidityAoA;
+/* ========================================================================
+ * Recipients table (overview)
+ * ===================================================================== */
+const RECIPIENT_RANGES = [
+  ["3m", "3 months"], ["1y", "1 year"], ["2y", "2 years"],
+  ["5y", "5 years"], ["all", "All time"],
+];
+const RECIPIENT_SIZES = [
+  ["all", "Any size"], ["small", "Under $50k"],
+  ["medium", "$50k–$250k"], ["large", "Over $250k"],
+];
 
-    if (!aoa.length) {
-      document.getElementById("liquidityContent").innerHTML =
-        '<div class="loading-placeholder">No liquidity data</div>';
-      return;
+function rangeStart(range) {
+  const n = new Date();
+  const back = { "3m": [0, 3], "1y": [1, 0], "2y": [2, 0], "5y": [5, 0] }[range];
+  return back
+    ? new Date(n.getFullYear() - back[0], n.getMonth() - back[1], n.getDate())
+    : null;
+}
+
+function recipientRows() {
+  const start = rangeStart(recipientView.range);
+  if (!start) return data.recipients.map((r) => ({ ...r }));
+  const map = new Map();
+  const entry = (name) => {
+    if (!map.has(name)) map.set(name, { name, paid: 0, future: 0 });
+    return map.get(name);
+  };
+  const now = new Date();
+  for (const p of data.payouts) {
+    const d = date(p.date);
+    if (d && d >= start && d <= now) entry(p.name || "Unknown").paid += p.amount;
+  }
+  for (const g of data.grants) {
+    if (g.decision !== "approved") continue;
+    for (const m of g.milestones) if (!m.paid) entry(g.grantee).future += m.amount;
+  }
+  return [...map.values()]
+    .map((r) => ({ ...r, total: r.paid + r.future }))
+    .filter((r) => r.total > 0);
+}
+
+function renderRecipients() {
+  const { key, dir } = recipientSort;
+  const sizeOk = (total) =>
+    recipientView.size === "all" ||
+    (recipientView.size === "small" && total < 50000) ||
+    (recipientView.size === "medium" && total >= 50000 && total <= 250000) ||
+    (recipientView.size === "large" && total > 250000);
+  const rows = recipientRows()
+    .filter((r) => sizeOk(r.total))
+    .sort((a, b) =>
+      key === "name" ? a.name.localeCompare(b.name) * dir : (a[key] - b[key]) * dir,
+    );
+  const totalPaid = rows.reduce((s, r) => s + r.paid, 0);
+  const totalFuture = rows.reduce((s, r) => s + r.future, 0);
+  const group = (label, attr, options, current) => `
+    <div><span class="control-label">${label}</span>
+      <div class="segmented" role="group" aria-label="${label}">
+        ${options.map(([v, text]) => `<button type="button" class="button" data-${attr}="${v}"
+          aria-pressed="${v === current}">${text}</button>`).join("")}
+      </div></div>`;
+  const head = [
+    ["name", "Recipient"], ["paid", "Paid out"],
+    ["future", "Future milestones"], ["total", "Total"],
+  ].map(([k, label]) => {
+    const selected = k === key;
+    return `<th scope="col" class="${k === "name" ? "" : "number"}"
+      aria-sort="${selected ? (dir > 0 ? "ascending" : "descending") : "none"}">
+      <button data-recipient-sort="${k}">${label}${selected ? (dir > 0 ? " ↑" : " ↓") : ""}</button></th>`;
+  }).join("");
+
+  $("recipientsContent").innerHTML = `
+    <article class="card">
+      <div class="control-bar">
+        ${group("Period", "recipient-range", RECIPIENT_RANGES, recipientView.range)}
+        ${group("Recipient size", "recipient-size", RECIPIENT_SIZES, recipientView.size)}
+      </div>
+      <div class="table-summary">
+        <div><strong>${usd(totalPaid)}</strong><span>Paid out</span></div>
+        <div><strong>${usd(totalFuture)}</strong><span>Future milestones</span></div>
+        <div><strong>${rows.length}</strong><span>Recipients</span></div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr>${head}</tr></thead>
+          <tbody>${rows.length ? rows.map((r) => `<tr>
+            <td>${escapeHTML(r.name)}</td>
+            <td class="number">${usd(r.paid)}</td>
+            <td class="number">${usd(r.future)}</td>
+            <td class="number"><strong>${usd(r.total)}</strong></td></tr>`).join("")
+            : '<tr><td colspan="4" class="empty">No recipients match.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <p class="spark-caption" style="margin-top:14px">
+        Size filters use each recipient's total in the selected period.
+        "All time" uses the Funds Distribution sheet. Shorter periods are summed
+        from dated grant, contractor, stipend and discretionary budget payouts.
+        Future milestones are not time-limited.
+      </p>
+    </article>`;
+}
+
+/* ========================================================================
+ * Grants page
+ * ===================================================================== */
+function renderGrantsMini() {
+  const findGrant = (a) =>
+    data.grants.find((g) => g.project === a.project && g.grantee === a.grantee);
+  const link = (g, text) =>
+    g
+      ? `<a href="#grants?grant=${encodeURIComponent(g.id)}">${escapeHTML(text)}</a>`
+      : escapeHTML(text);
+
+  const latest = [...data.approvals]
+    .sort((a, b) => +date(b.date) - +date(a.date))
+    .slice(0, MINI_COUNT)
+    .map(
+      (a) => `<li><div><strong>${link(findGrant(a), a.project)}</strong>
+        <small>${escapeHTML(a.grantee)} · ${fmtDate(a.date)}</small></div>
+        <span class="amount">${usd(data.totals[norm(a.project)] || 0)}</span></li>`,
+    );
+
+  const recent = data.payouts
+    .filter((p) => p.kind === "grant")
+    .sort((a, b) => +date(b.date) - +date(a.date))
+    .slice(0, MINI_COUNT)
+    .map(
+      (p) => `<li><div><strong>${escapeHTML(p.project)}</strong>
+        <small>${escapeHTML(p.name)} · ${fmtDate(p.date)}</small></div>
+        <span class="amount">${usd(p.amount)}</span></li>`,
+    );
+
+  /* Last 30 days stats */
+  const now = new Date();
+  const end = new Date(+now + 1);
+  const start30 = new Date(+now - 30 * DAY);
+  const grantPayouts = data.payouts.filter((p) => p.kind === "grant");
+  const approvals30 = data.approvals.filter((a) => {
+    const d = date(a.date);
+    return d && d >= start30 && d < end;
+  });
+  const allocated = approvals30.reduce(
+    (sum, a) => sum + (data.totals[norm(a.project)] || 0),
+    0,
+  );
+  const paid30 = sumBetween(grantPayouts, start30, end);
+  const milestones30 = countBetween(grantPayouts, start30, end);
+
+  const card = (title, items) => `<article class="card mini-card">
+    <h2>${title}</h2>
+    <ul class="mini-list">${items.join("") || '<li class="muted">No data</li>'}</ul>
+  </article>`;
+  const statsCard = `<article class="card mini-card">
+    <h2>Last 30 days</h2>
+    <div class="metric-value">${usd(paid30)}</div>
+    <p class="metric-subtitle">paid out for grants</p>
+    ${stat("Grants approved", approvals30.length)}
+    ${stat("Milestones paid", milestones30)}
+    ${stat("Funding allocated to new grants", usd(allocated))}
+    ${stat("Avg milestone payout", usd(milestones30 ? paid30 / milestones30 : 0))}
+  </article>`;
+
+  $("grantsMini").innerHTML =
+    card("Latest approvals", latest) +
+    card("Recent payouts", recent) +
+    statsCard;
+}
+
+function renderGrants() {
+  renderGrantsMini();
+
+  const category = $("grantCategory").value;
+  const categories = [...new Set(data.grants.map((g) => g.category))]
+    .filter(Boolean)
+    .sort();
+  $("grantCategory").innerHTML =
+    '<option value="all">All categories</option>' +
+    categories
+      .map(
+        (value) =>
+          `<option value="${escapeHTML(value)}">${escapeHTML(value)}</option>`,
+      )
+      .join("");
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const requestedCategory = params.get("category") || category;
+  if (categories.includes(requestedCategory)) {
+    $("grantCategory").value = requestedCategory;
+  }
+
+  const query = norm($("grantSearch").value);
+  const status = $("grantStatus").value;
+  const budget = $("grantBudget").value;
+  const selectedCategory = $("grantCategory").value;
+  const sort = $("grantSort").value;
+
+  const filtered = data.grants.filter((grant) => {
+    const approved = grant.decision === "approved";
+    if (["discussion", "rejected"].includes(status)) {
+      if (grant.decision !== status) return false;
+    } else {
+      if (!approved) return false;
+      if (status === "overdue" && !grant.milestones.some(isOverdue)) {
+        return false;
+      }
+      if (!["all", "overdue"].includes(status) && grant.status !== status) {
+        return false;
+      }
     }
-
-    const COL_PROJECT = 0;
-    const COL_AMOUNT_USD = 1;
-    const COL_KPI_LABEL = 7;
-    const COL_KPI_VALUE = 8;
-
-    const norm = (s) =>
-      (s || "").toString().replace(/\u00A0/g, " ").trim().toLowerCase();
-
-    let zecBalance = 0;
-    let cacaoBalance = 0;
-    let usdValueWallet = 0;
-    let gainLossKPI = 0;
-
-    for (let r = 1; r < aoa.length; r++) {
-      const label = aoa[r]?.[COL_KPI_LABEL];
-      const value = aoa[r]?.[COL_KPI_VALUE];
-
-      if (!label && !value) continue;
-
-      const k = norm(label);
-      const v = cleanNumber(value);
-
-      if (k === "usd value in wallet") usdValueWallet = v;
-      else if (k === "zec") zecBalance = v;
-      else if (k === "cacao") cacaoBalance = v;
-      else if (k.includes("gain/loss")) gainLossKPI = v;
+    if (query && !grant.search.includes(query)) return false;
+    if (budget === "small" && grant.total >= 50000) return false;
+    if (budget === "medium" && (grant.total < 50000 || grant.total > 200000)) {
+      return false;
     }
+    if (budget === "large" && grant.total <= 200000) return false;
+    return selectedCategory === "all" || grant.category === selectedCategory;
+  });
 
-    let totalLiquidityAdded = 0;
-    for (let r = 1; r < aoa.length; r++) {
-      const proj = aoa[r]?.[COL_PROJECT];
-      if (!proj) continue;
-      const amt = cleanNumber(aoa[r]?.[COL_AMOUNT_USD]);
-      if (amt > 0) totalLiquidityAdded += amt;
-    }
+  filtered.sort((a, b) => {
+    if (sort === "biggest") return b.total - a.total;
+    if (sort === "smallest") return a.total - b.total;
+    const da = +(date(a.lastPaid || a.submitted) || 0);
+    const db = +(date(b.lastPaid || b.submitted) || 0);
+    return sort === "oldest" ? da - db : db - da;
+  });
 
-    document.getElementById("liquidityContent").innerHTML = `
-      <div class="liquidity-cards">
-        <div class="liquidity-card">
-          <div class="liquidity-content">
-            <div class="liquidity-icon liquidity-icon-bg">🌊</div>
-            <div>
-              <div class="liquidity-label">Total Liquidity Added</div>
-              <div class="liquidity-value">${formatUSD(totalLiquidityAdded)}</div>
+  $("grantCount").textContent =
+    `${filtered.length} shown · ${data.grants.length} total tracked records`;
+    $("grantsContainer").innerHTML = filtered.length
+    ? filtered
+        .map((grant) => {
+          const paidPercent = grant.total
+            ? Math.min(100, Math.max(0, (grant.paid / grant.total) * 100))
+            : 0;
+
+          // 100% = complete green, >= 75% = medium green, default = yellow
+          const ringClass =
+            paidPercent >= 100
+              ? "ring-complete"
+              : paidPercent >= 75
+                ? "ring-mid"
+                : "";
+
+          const next = nextMilestone(grant);
+          const due = next?.estimate || next?.due;
+          const label =
+            grant.decision === "approved"
+              ? grant.status.replace("-", " ")
+              : grant.decision;
+          return `
+          <button class="card grant-card" data-grant="${escapeHTML(grant.id)}">
+            <h3>${escapeHTML(grant.project)}</h3>
+            <div class="grant-grantee">${escapeHTML(grant.grantee)}</div>
+            <div class="grant-tags">
+              <span class="badge yellow">${escapeHTML(label)}</span>
+              ${
+                grant.category
+                  ? `<span class="badge">${escapeHTML(grant.category)}</span>`
+                  : ""
+              }
             </div>
-          </div>
-        </div>
-        <div class="liquidity-card">
-          <div class="liquidity-content">
-            <div class="liquidity-icon liquidity-icon-bg">💵</div>
-            <div>
-              <div class="liquidity-label">Current USD Value</div>
-              <div class="liquidity-value">${formatUSD(usdValueWallet)}</div>
-            </div>
-          </div>
-        </div>
-        <div class="liquidity-card">
-          <div class="liquidity-content">
-            <div class="liquidity-icon liquidity-icon-bg">⚡</div>
-            <div>
-              <div class="liquidity-label">ZEC Balance</div>
-              <div class="liquidity-value">${formatZEC(zecBalance)}</div>
-            </div>
-          </div>
-        </div>
-        <div class="liquidity-card">
-          <div class="liquidity-content">
-            <div class="liquidity-icon liquidity-icon-bg">☕</div>
-            <div>
-              <div class="liquidity-label">CACAO Balance</div>
-              <div class="liquidity-value">${cacaoBalance.toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-        <div class="liquidity-card ${gainLossKPI >= 0 ? "positive" : "negative"}">
-          <div class="liquidity-content">
-            <div class="liquidity-icon liquidity-icon-bg">🔻</div>
-            <div>
-              <div class="liquidity-label">Impermanent Loss</div>
-              <div class="liquidity-value">
-                ${gainLossKPI >= 0 ? "+" : ""}${formatUSD(gainLossKPI)}
+            <div class="grant-finance">
+              <div>
+                <strong>${
+                  grant.decision === "approved" ? usd(grant.total) : "Proposal"
+                }</strong>
+                <span class="metric-subtitle">${
+                  grant.decision === "approved"
+                    ? `${usd(grant.paid)} paid · ${grant.done}/${grant.milestones.length} milestones`
+                    : "Approved budget not available"
+                }</span>
+              </div>
+              <div class="ring ${ringClass}" style="--progress:${paidPercent}%">
+                <span>${paidPercent.toFixed(0)}%</span>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    `;
-  } catch (error) {
-    console.error("Error loading liquidity data:", error);
-    document.getElementById("liquidityContent").innerHTML =
-      '<div class="loading-placeholder">Error loading liquidity data</div>';
-  }
+            <div class="grant-next ${isOverdue(next) ? "overdue" : ""}">
+              ${
+                next
+                  ? `${isOverdue(next) ? "Overdue" : "Next milestone"}:
+                    ${usd(next.amount)} · ${due ? fmtDate(due) : "Date TBA"}`
+                  : grant.status === "completed"
+                    ? "All milestones paid"
+                    : "No milestone schedule available"
+              }
+            </div>
+          </button>`;
+        })
+        .join("")
+    : '<div class="card empty">No grants match these filters.</div>';
+  syncDropdowns();
 }
 
-/* ===== Stipends ===== */
-async function loadStipends() {
-  try {
-    const data = await ensureAppData();
-    const rows = data.stipendsRows;
+function updateGrantURL() {
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  for (const [name, id, defaultValue] of [
+    ["status", "grantStatus", "all"],
+    ["budget", "grantBudget", "all"],
+    ["category", "grantCategory", "all"],
+    ["sort", "grantSort", "newest"],
+  ]) {
+    if ($(id).value === defaultValue) params.delete(name);
+    else params.set(name, $(id).value);
+  }
+  const text = params.toString();
+  history.replaceState(null, "", `#grants${text ? `?${text}` : ""}`);
+}
 
-    const monthly = {};
-    let totalUSDYTD = 0;
-    let totalZECYTD = 0;
+/* ========================================================================
+ * Grant dialog (native <dialog> handles focus containment)
+ * ===================================================================== */
+function openGrantFromHash() {
+  if (!data || activePage !== "grants") return;
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const id = params.get("grant");
+  const grant = data.grants.find((item) => item.id === id);
+  if (grant && $("grantDialog").dataset.grant !== id) showGrant(grant);
+}
 
-    rows.forEach((r) => {
-      const date = toDate(r["Date"]);
-      if (!date) return;
+async function showGrant(grant) {
+  const request = ++modalRequest;
+  const dialog = $("grantDialog");
+  dialog.dataset.grant = grant.id;
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  params.set("grant", grant.id);
+  history.replaceState(null, "", `#grants?${params}`);
 
-      const monthKey = date.toLocaleString("default", {
-        month: "long",
-        year: "numeric",
-      });
-
-      const usd = cleanNumber(r["USD Amount"]);
-      const zec = cleanNumber(r["ZEC Amount"]) || cleanNumber(r["ZEC"]) || 0;
-
-      if (!monthly[monthKey]) {
-        monthly[monthKey] = { usd: 0, zec: 0 };
+  const remaining = Math.max(grant.total - grant.paid, 0);
+  const segments = grant.milestones.map((milestone) => ({
+    value: milestone.amount,
+    className: milestone.paid ? "bar-green" : "bar-yellow",
+  }));
+  $("dialogBody").innerHTML = `
+    <h2 id="dialogTitle" class="dialog-title">${escapeHTML(grant.project)}</h2>
+    <p class="muted">${escapeHTML(grant.grantee)}</p>
+    <div class="dialog-actions">
+      <button class="button primary" id="shareGrant">Copy grant link</button>
+      ${
+        grant.forum
+          ? `<a class="button" href="${escapeHTML(grant.forum)}"
+              target="_blank" rel="noopener noreferrer">Forum ↗</a>`
+          : ""
       }
+      <span id="githubLink"></span>
+    </div>
+    <div class="grant-tags">
+      <span class="badge yellow">${escapeHTML(
+        grant.decision === "approved" ? grant.status : grant.decision,
+      )}</span>
+      ${
+        grant.category
+          ? `<span class="badge">${escapeHTML(grant.category)}</span>`
+          : ""
+      }
+      <span class="badge">Opened ${fmtDate(grant.submitted)}</span>
+    </div>
+    <div class="detail-grid">
+      ${[
+        ["Approved budget", grant.total ? usd(grant.total) : "—"],
+        ["Paid", usd(grant.paid)],
+        ["Remaining", usd(remaining)],
+        ["Milestones", `${grant.done}/${grant.milestones.length}`],
+      ]
+        .map(
+          ([label, value]) => `
+        <div class="detail-tile">
+          <span class="metric-label">${label}</span>
+          <strong>${value}</strong>
+        </div>`,
+        )
+        .join("")}
+    </div>
+    ${bar(segments)}
+    <p class="spark-caption">
+      Dark = paid · Amber = outstanding · segment size represents USD value
+    </p>
+    <div class="divider"></div>
+    <h3>Project summary</h3>
+    <p class="summary-text" id="githubSummary">Finding GitHub application…</p>
+    <div class="divider"></div>
+    <h3>Milestone timeline</h3>
+    <ol class="timeline">
+      ${
+        grant.milestones.length
+          ? grant.milestones
+              .map(
+                (milestone, index) => `
+              <li>
+                <span class="timeline-marker">${milestone.paid ? "✓" : index + 1}</span>
+                <div>
+                  <div class="timeline-meta">
+                    <strong>${usd(milestone.amount)}</strong>
+                    <span class="badge ${
+                      milestone.paid
+                        ? "green"
+                        : isOverdue(milestone)
+                          ? "red"
+                          : "yellow"
+                    }">${
+                      milestone.paid
+                        ? "Paid"
+                        : isOverdue(milestone)
+                          ? "Overdue"
+                          : "Outstanding"
+                    }</span>
+                  </div>
+                  <p class="metric-subtitle">${
+                    milestone.paid
+                      ? `Paid ${fmtDate(milestone.paid)}`
+                      : milestone.estimate
+                        ? `Estimated ${fmtDate(milestone.estimate)}`
+                        : milestone.due
+                          ? `Due ${fmtDate(milestone.due)}`
+                          : "Date to be confirmed"
+                  }</p>
+                </div>
+              </li>`,
+              )
+              .join("")
+          : '<li class="muted">No milestones recorded.</li>'
+      }
+    </ol>`;
+  if (!dialog.open) dialog.showModal();
+  $("shareGrant").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      $("shareGrant").textContent = "Link copied";
+    } catch {
+      $("shareGrant").textContent = "Copy this page’s URL from your browser";
+    }
+  };
 
-      monthly[monthKey].usd += usd;
-      monthly[monthKey].zec += zec;
-      totalUSDYTD += usd;
-      totalZECYTD += zec;
-    });
-
-    const months = Object.keys(monthly);
-    const usdAllMembers = months.map((m) => monthly[m].usd);
-    const zecAllMembers = months.map((m) => monthly[m].zec);
-
-    const MEMBERS = 5;
-    const perMemberUsdYTD = totalUSDYTD / MEMBERS;
-    const avgMonths = months.length > 0 ? months.length : 1;
-    const avgPerMemberPerMonth = perMemberUsdYTD / avgMonths;
-
-    document.getElementById("stipendsContent").innerHTML = `
-      <div class="stipends-cards">
-        <div class="stipend-card">
-          <div class="stipend-label">Total Stipend Value YTD (USD)</div>
-          <div class="stipend-value">${formatUSD(totalUSDYTD)}</div>
-        </div>
-        <div class="stipend-card">
-          <div class="stipend-label">Total Paid YTD (ZEC units)</div>
-          <div class="stipend-value">${formatZEC(totalZECYTD)}</div>
-        </div>
-        <div class="stipend-card">
-          <div class="stipend-label">Per Member YTD (USD value)</div>
-          <div class="stipend-value">${formatUSD(perMemberUsdYTD)}</div>
-        </div>
-        <div class="stipend-card">
-          <div class="stipend-label">Avg Per Member / Month (USD value)</div>
-          <div class="stipend-value">${formatUSD(avgPerMemberPerMonth)}</div>
-        </div>
-      </div>
-
-      <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
-        5 committee members each receive a stipend worth
-        <strong>$1,725 USD + 10 ZEC</strong> per month. In practice, the USD
-        portion is paid in ZEC at the payout exchange rate, so the chart shows:
-        <br />
-        • total stipend value per month in USD (from the sheet), and<br />
-        • total ZEC units paid per month.
-        <br />
-        These are two views of the same payouts; the ZEC line should
-        <em>not</em> be added to the USD line.
-      </p>
-
-      <div class="stipends-chart-wrapper">
-        <div class="stipends-chart-title">Committee Stipends (All 5 Members)</div>
-        <div class="stipends-chart-subtitle">
-          USD value vs. ZEC units paid (same underlying payouts)
-        </div>
-        <div class="chart-container">
-          <canvas id="stipendsChart"></canvas>
-        </div>
-      </div>
-    `;
-
-    renderStipendsChart(months, usdAllMembers, zecAllMembers, null);
-  } catch (error) {
-    console.error(error);
-    document.getElementById("stipendsContent").innerHTML =
-      '<div class="loading-placeholder">Error loading stipends data</div>';
+  try {
+    const key = `zcg-github-v2:${grant.project}`;
+    const cached = readCache(key);
+    let issue = cached?.value;
+    if (!cached || Date.now() - cached.timestamp > 3 * DAY) {
+      const query =
+        `"${grant.project}" ` +
+        "repo:ZcashCommunityGrants/zcashcommunitygrants is:issue";
+      const response = await fetch(
+        `https://api.github.com/search/issues?q=${encodeURIComponent(query)}`,
+        { headers: { Accept: "application/vnd.github+json" } },
+      );
+      if (!response.ok) throw new Error("GitHub unavailable");
+      const result = await response.json();
+      const title = norm(grant.project);
+      issue =
+        result.items?.find(
+          (item) =>
+            norm(item.title) === title ||
+            norm(item.title) === `grant application - ${title}`,
+        ) || null;
+      writeCache(key, issue);
+    }
+    if (request !== modalRequest || !dialog.open) return;
+    if (!issue) {
+      $("githubSummary").textContent =
+        "No exact matching GitHub application found.";
+      return;
+    }
+    const link = safeURL(issue.html_url);
+    if (link) {
+      $("githubLink").innerHTML = `<a class="button" href="${escapeHTML(link)}"
+        target="_blank" rel="noopener noreferrer">GitHub ↗</a>`;
+    }
+    $("githubSummary").textContent =
+      extractSummary(issue.body || "") ||
+      "Open the GitHub application for full project details.";
+  } catch {
+    if (request === modalRequest && dialog.open) {
+      $("githubSummary").textContent =
+        "GitHub details unavailable. Its API may be rate-limited.";
+    }
   }
 }
 
-function renderStipendsChart(
-  months,
-  usdAllMembers,
-  zecAllMembers,
-  fixed10ZecUsdLine
-) {
-  const ctx = document.getElementById("stipendsChart");
-  if (!ctx) return;
-  if (ctx.chart) ctx.chart.destroy();
-
-  const hasFixedLine =
-    Array.isArray(fixed10ZecUsdLine) && fixed10ZecUsdLine.length === months.length;
-
-  const datasets = [
-    {
-      label: "Stipend value (USD, all members)",
-      data: usdAllMembers,
-      borderColor: "#4caf50",
-      backgroundColor: "rgba(76, 175, 80, 0.1)",
-      tension: 0.3,
-      fill: true,
-      yAxisID: "yUSD",
-    },
-    {
-      label: "Stipend paid (ZEC, all members)",
-      data: zecAllMembers,
-      borderColor: "#f3a622",
-      backgroundColor: "rgba(243, 166, 34, 0.1)",
-      tension: 0.3,
-      fill: true,
-      yAxisID: "yZEC",
-    },
-  ];
-
-  if (hasFixedLine) {
-    datasets.push({
-      label: "USD value of fixed 10 ZEC/member",
-      data: fixed10ZecUsdLine,
-      borderColor: "#e91e63",
-      backgroundColor: "rgba(233, 30, 99, 0.05)",
-      tension: 0.3,
-      fill: false,
-      yAxisID: "yUSD",
-      borderDash: [5, 4],
-    });
+function extractSummary(markdown) {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((line) =>
+    /^(?:#{1,6}\s*|\*\*\s*)(?:project summary|description)/i.test(line.trim()),
+  );
+  if (start < 0) return "";
+  const output = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,6}\s|^\*\*[^*]+\*\*\s*$/.test(line.trim())) break;
+    output.push(line);
   }
+  const text = output.join("\n").replace(/[#*`]/g, "").trim();
+  return text.length > 1200 ? `${text.slice(0, 1200)}…` : text;
+}
 
-  ctx.chart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: months,
-      datasets,
-    },
+function clearModalURL() {
+  modalRequest++;
+  $("grantDialog").dataset.grant = "";
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  if (!params.has("grant")) return;
+  params.delete("grant");
+  const text = params.toString();
+  history.replaceState(null, "", `#grants${text ? `?${text}` : ""}`);
+}
+
+/* ========================================================================
+ * Security page: chart on the existing canvas + searchable table
+ * ===================================================================== */
+function renderSecurity() {
+  const rows = data.security.filter((r) => r.date);
+  const colors = chartColors();
+  const keys = months(12);
+  const types = [
+    ["Audit", "Audits", colors.ink],
+    ["Bounty", "Bounties", colors.amber],
+    ["Security", "Other security", colors.gray],
+  ];
+  const datasets = types
+    .map(([type, label, color]) => ({
+      label,
+      backgroundColor: color,
+      borderRadius: 4,
+      data: monthly(
+        rows.filter((r) => r.type === type),
+        keys,
+        "usd",
+      ),
+    }))
+    .filter((d) => d.data.some(Boolean));
+
+  makeChart("securityChart", {
+    type: "bar",
+    data: { labels: keys, datasets },
     options: {
-      ...getChartOptions(),
-      interaction: { mode: "index", intersect: false },
       scales: {
-        x: getChartOptions().scales.x,
-        yUSD: {
-          type: "linear",
-          position: "left",
-          title: { display: true, text: "USD value" },
-          beginAtZero: true,
-          grid: {
-            color: getComputedStyle(document.documentElement)
-              .getPropertyValue("--grid-color")
-              .trim(),
-          },
-          ticks: {
-            color: getComputedStyle(document.documentElement)
-              .getPropertyValue("--text-tertiary")
-              .trim(),
-            callback: (v) => formatUSD(v),
-          },
-        },
-        yZEC: {
-          type: "linear",
-          position: "right",
-          title: { display: true, text: "ZEC units" },
-          beginAtZero: true,
-          grid: { drawOnChartArea: false },
-          ticks: {
-            color: getComputedStyle(document.documentElement)
-              .getPropertyValue("--text-tertiary")
-              .trim(),
-          },
+        x: { stacked: true },
+        y: {
+          stacked: true,
+          ticks: { color: colors.text, callback: (v) => usd(v) },
         },
       },
       plugins: {
-        ...getChartOptions().plugins,
         tooltip: {
-          mode: "index",
-          intersect: false,
-          callbacks: {
-            label(context) {
-              const i = context.dataIndex;
-              const label = context.dataset.label || "";
-
-              if (label.startsWith("Stipend value (USD")) {
-                return `USD value: ${formatUSD(usdAllMembers[i] || 0)}`;
-              }
-
-              if (label.startsWith("Stipend paid (ZEC")) {
-                return `ZEC paid: ${formatZEC(zecAllMembers[i] || 0)}`;
-              }
-
-              if (label.startsWith("USD value of fixed 10 ZEC")) {
-                return `10 ZEC/member (USD): ${formatUSD(
-                  fixed10ZecUsdLine[i] || 0
-                )}`;
-              }
-
-              return `${label}: ${context.formattedValue}`;
-            },
-          },
+          callbacks: { label: (c) => `${c.dataset.label}: ${usd(c.raw)}` },
         },
       },
     },
   });
+  renderTable("security");
 }
 
-/* ===== IC Payouts (Audit) ===== */
-function renderAuditPaymentsChart(rows) {
-  const monthly = {};
+/* ========================================================================
+ * Shared pages: stipends / notetaker / events (top stats + chart + table)
+ * ===================================================================== */
+const NUMERIC_FORMATS = ["usd", "zec", "rate"];
+const DATE_FORMATS = ["date", "datelabel"];
 
-  rows.forEach((r) => {
-    const date = toDate(r["Paid Out"]);
-    if (!date) return;
+function tableConfig(type) {
+  const isNotes = (row) => NOTES_TEXT.test(row.project);
+  if (type === "stipends") {
+    return {
+      target: "stipendsContent",
+      rows: data.stipends,
+      hasZec: true,
+      tiles: true,
+      columns: [
+        ["date", "Date", "date"],
+        ["recipient", "Member / recipient", "text"],
+        ["usd", "USD value", "usd"],
+        ["zec", "ZEC units", "zec"],
+      ],
+    };
+  }
+  if (type === "notetaker") {
+    return {
+      target: "notetakerContent",
+      rows: data.contractors.filter(isNotes),
+      hasZec: true,
+      tiles: true,
+      columns: [
+        ["date", "Paid date", "date"],
+        ["recipient", "Recipient", "text"],
+        ["usd", "USD value", "usd"],
+        ["zec", "ZEC units", "zec"],
+        ["rate", "ZEC/USD", "rate"],
+      ],
+    };
+  }
+  if (type === "events") {
+    return {
+      target: "eventsContent",
+      rows: events || [],
+      hasZec: false,
+      tiles: false,
+      columns: [
+        ["date", "Dates", "datelabel"],
+        ["name", "Event", "link"],
+        ["location", "Location", "text"],
+        ["status", "Status", "badge"],
+        ["typeText", "Funding type", "text"],
+        ["usd", "Total cost", "usd"],
+      ],
+    };
+  }
+  return {
+    target: "securityContent",
+    rows: data.security,
+    hasZec: true,
+    tiles: true,
+    columns: [
+      ["date", "Paid date", "date"],
+      ["type", "Type", "text"],
+      ["project", "Project", "text"],
+      ["recipient", "Recipient", "text"],
+      ["usd", "USD value", "usd"],
+      ["zec", "ZEC units", "zec"],
+    ],
+  };
+}
 
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
-      2,
-      "0"
-    )}`;
+function chartCard(type, title, caption) {
+  return `<article class="card" style="margin-bottom:16px">
+    <div class="card-heading"><div>
+      <h2>${title}</h2><p>${caption}</p>
+    </div></div>
+    <div class="chart-wrap"><canvas id="${type}Chart"></canvas></div>
+  </article>`;
+}
 
-    const usd = cleanNumber(r["Amount (USD)"]);
-    const zec = cleanNumber(r["ZEC Disbursed"]);
+function pageTop(type, config) {
+  const keys = months(12);
+  const monthsElapsed = new Date().getMonth() + 1;
 
-    if (!monthly[monthKey]) monthly[monthKey] = { usd: 0, zec: 0 };
-    monthly[monthKey].usd += usd;
-    monthly[monthKey].zec += zec;
-  });
+  if (type === "stipends") {
+    const rows = ytdRows(config.rows);
+    const byMember = new Map();
+    for (const row of rows) {
+      const name = row.recipient || "Unknown";
+      const current = byMember.get(name) || { usd: 0, zec: 0 };
+      current.usd += row.usd;
+      current.zec += row.zec;
+      byMember.set(name, current);
+    }
+    const totalUSD = rows.reduce((s, r) => s + r.usd, 0);
+    const totalZEC = rows.reduce((s, r) => s + r.zec, 0);
+    const members = [...byMember].sort((a, b) => b[1].usd - a[1].usd);
+    return `
+      <div class="metrics-grid">
+        <article class="card treasury-card">
+          <div class="metric-label">Total YTD paid out</div>
+          <div class="metric-value">${usd(totalUSD)}</div>
+          <p class="metric-subtitle">${zec(totalZEC)} · ${members.length} members</p>
+          ${stat("Avg per month (all members)", usd(totalUSD / monthsElapsed))}
+          ${stat("Avg per member per month", usd(
+            members.length ? totalUSD / monthsElapsed / members.length : 0,
+          ))}
+        </article>
+        ${members
+          .map(
+            ([name, v]) => `
+          <article class="card">
+            <div class="metric-label">${escapeHTML(name)} · YTD</div>
+            <div class="metric-value">${usd(v.usd)}</div>
+            <p class="metric-subtitle">total paid this year · ${zec(v.zec)}</p>
+            ${stat("Avg per month (YTD)", usd(v.usd / monthsElapsed))}
+          </article>`,
+          )
+          .join("")}
+      </div>
+      ${chartCard("stipends", "Monthly stipend payments", "USD paid per month · last 12 months")}`;
+  }
 
-  const labels = Object.keys(monthly).sort();
-  const usdData = labels.map((m) => monthly[m].usd);
-  const zecData = labels.map((m) => monthly[m].zec);
+  if (type === "notetaker") {
+    const values = monthly(config.rows, keys, "usd");
+    const firstIndex = values.findIndex((v) => v > 0);
+    const divisor = firstIndex < 0 ? 12 : 12 - firstIndex;
+    const last12 = values.reduce((s, v) => s + v, 0);
+    const ytd = ytdRows(config.rows).reduce((s, r) => s + r.usd, 0);
+    return `
+      <div class="metrics-grid">
+        <article class="card treasury-card">
+          <div class="metric-label">Avg pay per month</div>
+          <div class="metric-value">${usd(last12 / divisor)}</div>
+          <p class="metric-subtitle">average over the last ${divisor} month${divisor === 1 ? "" : "s"} with data</p>
+        </article>
+        <article class="card">
+          <div class="metric-label">Total YTD paid out</div>
+          <div class="metric-value">${usd(ytd)}</div>
+          <p class="metric-subtitle">${usd(ytd / monthsElapsed)} avg per month YTD</p>
+        </article>
+        <article class="card">
+          <div class="metric-label">Last 12 months</div>
+          <div class="metric-value">${usd(last12)}</div>
+          <p class="metric-subtitle">${config.rows.length} payments all time</p>
+        </article>
+      </div>
+      ${chartCard("notetaker", "Monthly notetaker payments", "USD paid per month · last 12 months")}`;
+  }
 
-  const ctx = document.getElementById("auditPaymentsChart");
-  if (!ctx) return;
-  if (ctx.chart) ctx.chart.destroy();
+  if (type === "events") {
+    const all = config.rows;
+    const done = all.filter((e) => e.status === "done");
+    const upcoming = all.filter((e) => e.status !== "done");
+    const start = yearStart();
+    const doneYtd = done.filter((e) => {
+      const d = date(e.date);
+      return d && d >= start;
+    });
+    const sum = (list) => list.reduce((s, e) => s + e.usd, 0);
+    const byType = {};
+    for (const e of done) byType[e.type] = (byType[e.type] || 0) + e.usd;
+    return `
+      <div class="metrics-grid">
+        <article class="card treasury-card">
+          <div class="metric-label">Total YTD paid out</div>
+          <div class="metric-value">${usd(sum(doneYtd))}</div>
+          <p class="metric-subtitle">${doneYtd.length} completed events</p>
+          ${stat("Avg per event", usd(doneYtd.length ? sum(doneYtd) / doneYtd.length : 0))}
+        </article>
+        <article class="card">
+          <div class="metric-label">Upcoming committed</div>
+          <div class="metric-value">${usd(sum(upcoming))}</div>
+          <p class="metric-subtitle">${upcoming.length} upcoming events</p>
+          ${stat("Total tracked", usd(sum(all)))}
+        </article>
+        <article class="card">
+          <div class="metric-label">Completed by type</div>
+          <div class="metric-value">${done.length}</div>
+          <p class="metric-subtitle">events done</p>
+          ${Object.entries(byType)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, value]) => stat(escapeHTML(name), usd(value)))
+            .join("")}
+        </article>
+      </div>
+      ${chartCard("events", "Monthly event spending", "Completed events by start month · last 12 months · upcoming events excluded")}`;
+  }
+  return "";
+}
 
-  ctx.chart = new Chart(ctx, {
-    type: "line",
+function drawTableChart(type, config) {
+  const colors = chartColors();
+  const keys = months(12);
+  const id = `${type}Chart`;
+  const tooltip = {
+    callbacks: { label: (c) => `${c.dataset.label}: ${usd(c.raw)}` },
+  };
+  const yAxis = { ticks: { color: colors.text, callback: (v) => usd(v) } };
+
+  if (type === "events") {
+    const done = config.rows.filter((e) => e.status === "done" && e.date);
+    const types = [
+      ["Grant", colors.ink],
+      ["Sponsorship", colors.amber],
+      ["Reimbursement", colors.gray],
+      ["Other", "#c9c6bb"],
+    ];
+    const datasets = types
+      .map(([name, color]) => ({
+        label: name,
+        backgroundColor: color,
+        borderRadius: 4,
+        data: monthly(
+          done.filter((e) => e.type === name),
+          keys,
+          "usd",
+        ),
+      }))
+      .filter((d) => d.data.some(Boolean));
+    makeChart(id, {
+      type: "bar",
+      data: { labels: keys, datasets },
+      options: {
+        scales: { x: { stacked: true }, y: { stacked: true, ...yAxis } },
+        plugins: { tooltip },
+      },
+    });
+    return;
+  }
+  makeChart(id, {
+    type: "bar",
     data: {
-      labels,
+      labels: keys,
       datasets: [
         {
-          label: "USD",
-          data: usdData,
-          yAxisID: "yUSD",
-          borderColor: "#4caf50",
-          backgroundColor: "rgba(76, 175, 80, 0.2)",
-          fill: true,
-          tension: 0.3,
-        },
-        {
-          label: "ZEC",
-          data: zecData,
-          yAxisID: "yZEC",
-          borderColor: "#f3a622",
-          backgroundColor: "rgba(243, 166, 34, 0.2)",
-          fill: true,
-          tension: 0.3,
+          label: "Paid (USD)",
+          data: monthly(config.rows, keys, "usd"),
+          backgroundColor: colors.amber,
+          borderRadius: 4,
         },
       ],
     },
     options: {
-      ...getChartOptions(),
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        yUSD: {
-          type: "linear",
-          position: "left",
-          title: { display: true, text: "USD" },
-          beginAtZero: true,
-        },
-        yZEC: {
-          type: "linear",
-          position: "right",
-          title: { display: true, text: "ZEC" },
-          grid: { drawOnChartArea: false },
-          beginAtZero: true,
-        },
-        x: getChartOptions().scales.x,
-      },
+      scales: { y: yAxis },
+      plugins: { legend: { display: false }, tooltip },
     },
   });
 }
 
-async function loadICPayouts() {
-  try {
-    const data = await ensureAppData();
-    const rows = data.icRows;
-
-    const filteredRows = rows.filter(
-      (r) =>
-        !((r["Project"] || "").toString().toLowerCase().includes(
-          "arborist call meeting notes"
-        ))
-    );
-
-    let totalUSD = 0;
-    let totalZEC = 0;
-
-    filteredRows.forEach((r) => {
-      totalUSD += cleanNumber(r["Amount (USD)"]);
-      totalZEC += cleanNumber(r["ZEC Disbursed"]);
-    });
-
-    let html = `
-      <div class="chart-card" style="margin-bottom:1rem;">
-        <h3 class="chart-title">Audit Payments Over Time</h3>
-        <div class="chart-container">
-          <canvas id="auditPaymentsChart"></canvas>
-        </div>
+function renderTable(type) {
+  const config = tableConfig(type);
+  const state = tableStates.get(type) || {
+    query: "",
+    sort: "date",
+    direction: -1,
+  };
+  tableStates.set(type, state);
+  const hasChart = type !== "security";
+  $(config.target).innerHTML = `
+    ${hasChart ? pageTop(type, config) : ""}
+    <article class="card" data-table="${type}">
+      <div class="table-summary" id="${type}Summary"></div>
+      <input type="search" data-table-search="${type}"
+        value="${escapeHTML(state.query)}"
+        placeholder="Search all columns…" aria-label="Search ${type} records" />
+      <p class="result-count" id="${type}Count"></p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr>
+            ${config.columns
+              .map(
+                ([key, label, format]) => `
+              <th scope="col" data-column="${key}"
+                class="${NUMERIC_FORMATS.includes(format) ? "number" : ""}">
+                <button data-table-sort="${type}" data-key="${key}">
+                  ${label} <span data-sort-mark="${key}"></span>
+                </button>
+              </th>`,
+              )
+              .join("")}
+          </tr></thead>
+          <tbody id="${type}Rows"></tbody>
+          <tfoot><tr>
+            <td colspan="${config.columns.length}" id="${type}Totals"></td>
+          </tr></tfoot>
+        </table>
       </div>
-      <table class="data-table">
-        <tr>
-          <th>Project</th>
-          <th>Recipient</th>
-          <th>USD</th>
-          <th>ZEC</th>
-          <th>Date</th>
-        </tr>
-    `;
+    </article>`;
+  if (hasChart) drawTableChart(type, config);
+  updateTable(type);
+}
 
-    filteredRows.forEach((r) => {
-      html += `
-        <tr>
-          <td>${escapeHtml(r["Project"] || "")}</td>
-          <td>${escapeHtml(r["Independent Contractor (IC)"] || "")}</td>
-          <td>${formatUSD(cleanNumber(r["Amount (USD)"]))}</td>
-          <td>${formatZEC(cleanNumber(r["ZEC Disbursed"]))}</td>
-          <td>${fmtDateCell(r["Paid Out"])}</td>
-        </tr>
-      `;
+function updateTable(type) {
+  const config = tableConfig(type);
+  const state = tableStates.get(type);
+  if (!state || !$(`${type}Rows`)) return;
+  const query = norm(state.query);
+  const cellText = (row, key, format) =>
+    format === "date"
+      ? fmtDate(row[key])
+      : format === "datelabel"
+        ? row.dateLabel
+        : row[key];
+  const rows = config.rows.filter((row) =>
+    norm(
+      config.columns
+        .map(([key, , format]) => cellText(row, key, format))
+        .join(" "),
+    ).includes(query),
+  );
+
+  rows.sort((a, b) => {
+    const column = config.columns.find(([key]) => key === state.sort);
+    const isDate = DATE_FORMATS.includes(column?.[2]);
+    const left = isDate ? +(date(a[state.sort]) || 0) : a[state.sort];
+    const right = isDate ? +(date(b[state.sort]) || 0) : b[state.sort];
+    return (
+      (typeof left === "number"
+        ? left - right
+        : String(left || "").localeCompare(String(right || ""))) *
+      state.direction
+    );
+  });
+
+  const sumOf = (list, field) =>
+    list.reduce((sum, row) => sum + (row[field] || 0), 0);
+
+  if (config.tiles) {
+    const ytd = ytdRows(config.rows);
+    $(`${type}Summary`).innerHTML = `
+      <div><strong>${usd(sumOf(ytd, "usd"))}</strong><span>Total YTD paid out</span></div>
+      ${
+        config.hasZec
+          ? `<div><strong>${zec(sumOf(ytd, "zec"))}</strong><span>Total YTD paid out (ZEC units)</span></div>`
+          : ""
+      }
+      <div><strong>${ytd.length}</strong><span>Payments YTD</span></div>`;
+  } else {
+    $(`${type}Summary`).innerHTML = "";
+  }
+
+  $(`${type}Count`).textContent =
+    `${rows.length} of ${config.rows.length} records shown`;
+
+  const formatCell = (value, format, row) => {
+    if (format === "date") return fmtDate(value);
+    if (format === "datelabel") return escapeHTML(row.dateLabel || "—");
+    if (format === "usd") return usd(value || 0);
+    if (format === "zec") return value ? zec(value) : "—";
+    if (format === "rate") return value ? Number(value).toFixed(2) : "—";
+    if (format === "link") {
+      return row.url
+        ? `<a href="${escapeHTML(row.url)}" target="_blank"
+            rel="noopener noreferrer">${escapeHTML(value)} ↗</a>`
+        : escapeHTML(value || "—");
+    }
+    if (format === "badge") {
+      const label = String(value || "—");
+      return `<span class="badge ${value === "done" ? "green" : "yellow"}">${escapeHTML(
+        label.charAt(0).toUpperCase() + label.slice(1),
+      )}</span>`;
+    }
+    return escapeHTML(value || "—");
+  };
+  $(`${type}Rows`).innerHTML = rows.length
+    ? rows
+        .map(
+          (row) => `<tr>${config.columns
+            .map(
+              ([key, , format]) =>
+                `<td class="${NUMERIC_FORMATS.includes(format) ? "number" : ""}">${formatCell(row[key], format, row)}</td>`,
+            )
+            .join("")}</tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="${config.columns.length}" class="empty">
+        No matching records.</td></tr>`;
+  $(`${type}Totals`).textContent = config.hasZec
+    ? `Totals for rows shown: ${usd(sumOf(rows, "usd"))} · ${zec(sumOf(rows, "zec"))}`
+    : `Total for rows shown: ${usd(sumOf(rows, "usd"))}`;
+
+  $(config.target)
+    .querySelectorAll("[data-column]")
+    .forEach((header) => {
+      const selected = header.dataset.column === state.sort;
+      header.setAttribute(
+        "aria-sort",
+        selected ? (state.direction === 1 ? "ascending" : "descending") : "none",
+      );
+      header.querySelector("[data-sort-mark]").textContent = selected
+        ? state.direction === 1
+          ? "↑"
+          : "↓"
+        : "";
     });
+}
 
-    html += `
-        <tr style="background:rgba(255,193,124,0.1);font-weight:600;">
-          <td colspan="2">Total</td>
-          <td>${formatUSD(totalUSD)}</td>
-          <td>${formatZEC(totalZEC)}</td>
-          <td></td>
-        </tr>
-      </table>
-    `;
+/* ========================================================================
+ * Liquidity: live Maya position, with sheet fallback
+ * ===================================================================== */
+async function getJSON(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+  return response.json();
+}
 
-    document.getElementById("icPayoutsContent").innerHTML = html;
-    renderAuditPaymentsChart(filteredRows);
+async function fetchMaya() {
+  const [member, pool] = await Promise.all([
+    getJSON(`${MIDGARD}/member/${MAYA_ADDRESS}`),
+    getJSON(`${MIDGARD}/pool/${MAYA_POOL}`),
+  ]);
+  const mine = member.pools?.find((p) => p.pool === MAYA_POOL);
+  if (!mine) throw new Error("No ZEC.ZEC position found for this address.");
+  const units = number(mine.liquidityUnits ?? mine.units);
+  const totalUnits = number(pool.units ?? pool.liquidityUnits);
+  const share = totalUnits ? units / totalUnits : 0;
+  const assetDepth = number(pool.assetDepth) / ASSET_DECIMALS;
+  const cacaoDepth = number(pool.runeDepth) / CACAO_DECIMALS;
+  const zecUsd = number(pool.assetPriceUSD);
+  const cacaoUsd = cacaoDepth ? (zecUsd * assetDepth) / cacaoDepth : 0;
+  const myZec = assetDepth * share;
+  const myCacao = cacaoDepth * share;
+  const value = myZec * zecUsd + myCacao * cacaoUsd;
+  /* Impermanent loss is measured against simply holding the original
+   * 2,580.34 ZEC (worth exactly $100,000 at deposit). */
+  const held = ENTRY_ZEC * zecUsd;
+  return {
+    share: share * 100,
+    myZec,
+    myCacao,
+    zecUsd,
+    cacaoUsd,
+    value,
+    poolZec: assetDepth,
+    poolUsd: assetDepth * zecUsd + cacaoDepth * cacaoUsd,
+    held,
+    il: held ? (value / held - 1) * 100 : 0,
+    vsHeld: value - held,
+    vsEntry: value - ENTRY_USD,
+  };
+}
+
+function drawLiquidity(m, timestamp = Date.now()) {
+  const pct = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const cacao = (v) =>
+    Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  $("liquidityCaption").textContent =
+    `Live position data from Maya Midgard · Updated ` +
+    `${new Date(timestamp).toLocaleString()} · refreshes every 6h`;
+  $("liquidityContent").innerHTML = `
+    <article class="card">
+      <div class="metric-label">Position value</div>
+      <div class="metric-value">${usd(m.value)}</div>
+      ${stat("ZEC", zec(m.myZec))}
+      ${stat("CACAO", cacao(m.myCacao))}
+      ${stat("Pool share", m.share.toFixed(2) + "%")}
+      ${stat("vs $100K entry", usd(m.vsEntry))}
+    </article>
+    <article class="card">
+      <div class="metric-label">Impermanent loss</div>
+      <div class="metric-value">${pct(m.il)}</div>
+      <p class="metric-subtitle">position vs. holding the original ${zec(ENTRY_ZEC)}</p>
+      ${stat(`If ${zec(ENTRY_ZEC)} were held`, usd(m.held))}
+      ${stat("Position vs holding", usd(m.vsHeld))}
+      ${stat("Initial deposit", `${zec(ENTRY_ZEC)} = ${usd(ENTRY_USD)}`)}
+    </article>
+    <article class="card">
+      <div class="metric-label">Total ZEC pool liquidity on Maya</div>
+      <div class="metric-value">${usd(m.poolUsd)}</div>
+      ${stat("ZEC in pool", zec(m.poolZec))}
+      ${stat("ZEC price", usd(m.zecUsd))}
+      ${stat("CACAO price", "$" + m.cacaoUsd.toFixed(3))}
+    </article>`;
+}
+
+function drawSheetLiquidity() {
+  const metrics = new Map();
+  let contributions = 0;
+  for (const row of (data?.liquidity || []).slice(1)) {
+    if (row[0] && number(row[1]) > 0) contributions += number(row[1]);
+    if (row[7]) metrics.set(norm(row[7]), number(row[8]));
+  }
+  const loss = [...metrics].find(([key]) => key.includes("gain/loss"))?.[1];
+  const values = [
+    ["Recorded contributions", usd(contributions)],
+    [
+      "Current wallet value",
+      metrics.has("usd value in wallet")
+        ? usd(metrics.get("usd value in wallet"))
+        : "—",
+    ],
+    ["ZEC balance", metrics.has("zec") ? zec(metrics.get("zec")) : "—"],
+    [
+      "CACAO balance",
+      metrics.has("cacao") ? metrics.get("cacao").toLocaleString() : "—",
+    ],
+    ["Reported gain / loss", loss == null ? "—" : usd(loss)],
+  ];
+  $("liquidityCaption").textContent =
+    "Live Maya data unavailable · showing figures from the spreadsheet.";
+  $("liquidityContent").innerHTML = values
+    .map(
+      ([label, value]) => `
+      <article class="card">
+        <div class="metric-label">${label}</div>
+        <div class="metric-value">${value}</div>
+      </article>`,
+    )
+    .join("");
+}
+
+async function renderLiquidity() {
+  if (mayaLoading) return;
+  const cached = readCache(MAYA_KEY);
+  if (cached?.value) {
+    drawLiquidity(cached.value, cached.timestamp);
+    if (Date.now() - cached.timestamp < MAYA_TTL) return;
+  } else {
+    $("liquidityContent").innerHTML = '<div class="card skeleton-card"></div>';
+  }
+  mayaLoading = true;
+  try {
+    const m = await fetchMaya();
+    writeCache(MAYA_KEY, m);
+    drawLiquidity(m);
   } catch (error) {
     console.error(error);
-    document.getElementById("icPayoutsContent").innerHTML =
-      '<div class="loading-placeholder">Error loading IC payouts data</div>';
-  }
-}
-
-/* ===== Notetaker ===== */
-async function loadNotetaker() {
-  try {
-    const data = await ensureAppData();
-    const rows = data.icRows;
-
-    const filtered = rows.filter((r) =>
-      (r["Project"] || "").toString().includes("Arborist Call Meeting Notes")
-    );
-
-    let totalUSD = 0;
-    let totalZEC = 0;
-
-    let html = `
-      <table class="data-table">
-        <tr>
-          <th>Date</th>
-          <th>USD</th>
-          <th>ZEC</th>
-          <th>ZEC/USD</th>
-        </tr>
-    `;
-
-    filtered.forEach((r) => {
-      const usd = cleanNumber(r["Amount (USD)"]);
-      const zec = cleanNumber(r["ZEC Disbursed"]);
-      totalUSD += usd;
-      totalZEC += zec;
-
-      html += `
-        <tr>
-          <td>${fmtDateCell(r["Paid Out"])}</td>
-          <td>${formatUSD(usd)}</td>
-          <td>${formatZEC(zec)}</td>
-          <td>${escapeHtml(r["ZEC/USD"] || "")}</td>
-        </tr>
-      `;
-    });
-
-    html += `
-        <tr style="background:rgba(255,193,124,0.1);font-weight:600;">
-          <th>Total</th>
-          <th>${formatUSD(totalUSD)}</th>
-          <th>${formatZEC(totalZEC)}</th>
-          <th></th>
-        </tr>
-      </table>
-    `;
-
-    document.getElementById("notetakerContent").innerHTML = html;
-  } catch (error) {
-    console.error("Error loading notetaker data:", error);
-    document.getElementById("notetakerContent").innerHTML =
-      '<div class="loading-placeholder">Error loading notetaker data</div>';
-  }
-}
-
-/* ===== Optional Manual Cache Controls ===== */
-function clearDashboardCaches() {
-  try {
-    localStorage.removeItem(LOCAL_CACHE_KEY);
-    localStorage.removeItem(ZEC_PRICE_CACHE_KEY);
-  } catch (err) {
-    console.warn("Failed clearing caches:", err);
-  }
-
-  workbook = null;
-  workbookPromise = null;
-  appData = null;
-  appDataPromise = null;
-  zecPricePromise = null;
-  allGrants = [];
-
-  parsedSheetCache.aoa.clear();
-  parsedSheetCache.objects.clear();
-}
-
-async function refreshDashboardData() {
-  clearDashboardCaches();
-  await ensureAppData({ force: true });
-}
-
-/* ===== Safety Check for marked library ===== */
-if (typeof marked === "undefined") {
-  window.marked = { parse: (s) => s };
-}
-
-/* ===== Init ===== */
-document.addEventListener("DOMContentLoaded", () => {
-  checkPendingGrant();
-  initThemeToggle();
-  initNavigation();
-  initGrantsFilters();
-  initDashboardFilters();
-  setupSearch();
-  startUpdateTimeFallback();
-
-  const modalOverlay = document.getElementById("modalOverlay");
-  if (modalOverlay) {
-    modalOverlay.addEventListener("click", (e) => {
-      if (e.target === modalOverlay) {
-        closeModal();
+    if (!cached?.value) {
+      if (data?.liquidity?.length) drawSheetLiquidity();
+      else {
+        $("liquidityContent").innerHTML = `<div class="card">
+          Could not load Maya liquidity. ${escapeHTML(error.message)}</div>`;
       }
-    });
+    }
+  } finally {
+    mayaLoading = false;
+  }
+}
+
+/* ========================================================================
+ * Events & init
+ * ===================================================================== */
+function applyTheme(theme, persist = true) {
+  document.documentElement.dataset.theme = theme;
+  if (persist) {
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {}
+  }
+  $("themeToggle").setAttribute(
+    "aria-label",
+    `Switch to ${theme === "dark" ? "light" : "dark"} mode`,
+  );
+}
+
+$("refreshButton").addEventListener("click", refreshData);
+$("themeToggle").addEventListener("click", () => {
+  const theme =
+    document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(theme);
+  // Re-render so charts pick up the new CSS variable colors.
+  renderedPages.clear();
+  renderActivePage();
+});
+
+$("grantSearch").addEventListener(
+  "input",
+  debounce(() => {
+    if (data) renderGrants();
+  }),
+);
+for (const id of ["grantStatus", "grantBudget", "grantCategory", "grantSort"]) {
+  $(id).addEventListener("change", () => {
+    updateGrantURL();
+    if (data) renderGrants();
+  });
+}
+$("grantsContainer").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-grant]");
+  if (!button || !data) return;
+  const grant = data.grants.find((item) => item.id === button.dataset.grant);
+  if (grant) showGrant(grant);
+});
+
+document.addEventListener(
+  "input",
+  debounce((event) => {
+    const type = event.target.dataset?.tableSearch;
+    if (!type || !tableStates.has(type)) return;
+    tableStates.get(type).query = event.target.value;
+    updateTable(type);
+  }),
+);
+
+document.addEventListener("click", (event) => {
+  const tableSort = event.target.closest("[data-table-sort]");
+  if (tableSort) {
+    const type = tableSort.dataset.tableSort;
+    const state = tableStates.get(type);
+    state.direction =
+      state.sort === tableSort.dataset.key ? -state.direction : 1;
+    state.sort = tableSort.dataset.key;
+    updateTable(type);
+    return;
+  }
+  const rangeBtn = event.target.closest("[data-recipient-range]");
+  if (rangeBtn && data) {
+    recipientView.range = rangeBtn.dataset.recipientRange;
+    renderRecipients();
+    return;
+  }
+  const sizeBtn = event.target.closest("[data-recipient-size]");
+  if (sizeBtn && data) {
+    recipientView.size = sizeBtn.dataset.recipientSize;
+    renderRecipients();
+    return;
+  }
+  const recipientButton = event.target.closest("[data-recipient-sort]");
+  if (recipientButton && data) {
+    const k = recipientButton.dataset.recipientSort;
+    recipientSort.dir =
+      recipientSort.key === k ? -recipientSort.dir : k === "name" ? 1 : -1;
+    recipientSort.key = k;
+    renderRecipients();
+  }
+  const payoutBtn = event.target.closest("[data-payout-range]");
+  if (payoutBtn && data) {
+    chartRanges.payout = payoutBtn.dataset.payoutRange;
+    payoutBtn.parentElement
+      .querySelectorAll("button")
+      .forEach((b) => b.setAttribute("aria-pressed", String(b === payoutBtn)));
+    renderOverviewCharts();
+    return;
+  }
+
+  const approvalBtn = event.target.closest("[data-approval-range]");
+  if (approvalBtn && data) {
+    chartRanges.approval = approvalBtn.dataset.approvalRange;
+    approvalBtn.parentElement
+      .querySelectorAll("button")
+      .forEach((b) => b.setAttribute("aria-pressed", String(b === approvalBtn)));
+    renderOverviewCharts();
+    return;
   }
 });
 
-/* ===== Expose Functions to Window ===== */
-window.showGrantDetails = showGrantDetails;
-window.closeModal = closeModal;
-window.clearDashboardCaches = clearDashboardCaches;
-window.refreshDashboardData = refreshDashboardData;
+$("closeDialog").addEventListener("click", () => $("grantDialog").close());
+$("grantDialog").addEventListener("close", clearModalURL);
+$("grantDialog").addEventListener("click", (event) => {
+  if (event.target !== $("grantDialog")) return;
+  const bounds = $("grantDialog").getBoundingClientRect();
+  if (
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom
+  ) {
+    $("grantDialog").close();
+  }
+});
+window.addEventListener("hashchange", route);
+
+/* ========================================================================
+ * Custom dropdowns (native <select> stays hidden and keeps working)
+ * ===================================================================== */
+function closeMenus() {
+  document.querySelectorAll(".dropdown-menu:not([hidden])").forEach((menu) => {
+    menu.hidden = true;
+    menu.previousElementSibling.setAttribute("aria-expanded", "false");
+  });
+}
+
+function syncDropdowns() {
+  document.querySelectorAll("select").forEach((s) => s._sync?.());
+}
+
+function enhanceSelect(select) {
+  if (select.dataset.enhanced) return;
+  select.dataset.enhanced = "1";
+  select.classList.add("native-hidden");
+  const wrap = document.createElement("div");
+  wrap.className = "dropdown";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "dropdown-button";
+  button.setAttribute("aria-haspopup", "listbox");
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-label", select.getAttribute("aria-label") || "Choose");
+  const menu = document.createElement("div");
+  menu.className = "dropdown-menu";
+  menu.setAttribute("role", "listbox");
+  menu.hidden = true;
+  select.after(wrap);
+  wrap.append(select, button, menu);
+
+  const sync = () => {
+    button.textContent = select.selectedOptions[0]?.textContent || "";
+    menu.innerHTML = [...select.options]
+      .map((o) => `<button type="button" class="button" role="option" class="dropdown-option"
+        data-value="${escapeHTML(o.value)}" aria-selected="${o.selected}">
+        ${escapeHTML(o.textContent)}</button>`)
+      .join("");
+  };
+  select._sync = sync;
+  sync();
+
+  button.addEventListener("click", () => {
+    const wasOpen = !menu.hidden;
+    closeMenus();
+    if (wasOpen) return;
+    sync();
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+  });
+  menu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-value]");
+    if (!option) return;
+    select.value = option.dataset.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    sync();
+    closeMenus();
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".dropdown")) closeMenus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMenus();
+});
+document.querySelectorAll("select").forEach(enhanceSelect);
+
+/* Boot */
+applyTheme(document.documentElement.dataset.theme || "light", false);
+const cached = readCache(CACHE_KEY);
+if (
+  cached?.value?.grants &&
+  cached.value.treasury &&
+  cached.value.security &&
+  cached.value.recipients
+) {
+  data = cached.value;
+}
+const cachedEvents = readCache(EVENTS_KEY);
+if (Array.isArray(cachedEvents?.value) && cachedEvents.value.length) {
+  events = cachedEvents.value;
+}
+route();
+if (data) updateStatus();
+if (!data || Date.now() - cached.timestamp > CACHE_TTL) refreshData();
+else if (!events || Date.now() - cachedEvents.timestamp > CACHE_TTL) {
+  loadEvents();
+}
