@@ -1134,6 +1134,103 @@ footer {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+/* Let segmented filter groups scroll instead of widening the page */
+.control-bar > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Payouts card: 30 days vs YTD */
+.dual-metric {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 6px 0 16px;
+}
+.dual-metric .metric-value {
+  font-size: clamp(22px, 2vw, 28px);
+  margin: 2px 0 6px;
+}
+.dual-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.compare-table th,
+.compare-table td {
+  padding: 6px 0;
+  font-size: 12.5px;
+  border-bottom: 0;
+}
+.compare-table thead th {
+  font-size: 10.5px;
+  padding-top: 0;
+  text-align: right;
+}
+.compare-table td {
+  text-align: right;
+  font-weight: 620;
+  padding-left: 12px;
+}
+.compare-table tbody th {
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+  font-weight: 450;
+  color: var(--muted);
+  white-space: normal;
+}
+.compare-table tbody th .dot {
+  display: inline-block;
+  margin-right: 7px;
+}
+.compare-table tr.sep th,
+.compare-table tr.sep td {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.compare-table tbody tr:hover {
+  background: none;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Recipients: type tags and spending mix */
+.type-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 8px;
+}
+.mix {
+  margin: -6px 0 18px;
+}
+.mix .segment-bar {
+  height: 10px;
+}
+.mix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12px;
+}
+.mix-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mix-legend strong {
+  font-weight: 620;
+}
+
 /* Mini charts on overview cards */
 .spark-title { margin-top: 18px; font-size: 12px; font-weight: 620; }
 .mini-chart { position: relative; height: 110px; margin-top: 8px; }
