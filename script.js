@@ -1,5 +1,5 @@
 "use strict";
-
+ 
 /* ========================================================================
  * Configuration
  * ===================================================================== */
@@ -16,7 +16,7 @@ const XLSX_LIBRARY =
 const PRICE_URL =
   "https://api.coingecko.com/api/v3/coins/zcash/market_chart" +
   "?vs_currency=usd&days=90";
-
+ 
 /* Maya liquidity */
 const MAYA_ADDRESS = "maya14n4r0uwpp96435llrum2mevsevk5ph0lq0rjem";
 const MAYA_POOL = "ZEC.ZEC";
@@ -27,16 +27,37 @@ const MAYA_KEY = "zcg-maya-v2";
 const MAYA_TTL = 6 * 60 * 60 * 1000;
 const ENTRY_ZEC = 2580.34; // Initial LP deposit: worth exactly $100,000
 const ENTRY_USD = 100000;
-
+ 
 const EVENTS_KEY = "zcg-events-v1";
 const CACHE_TTL = 60 * 60 * 1000;
 const PRICE_KEY = "zcg-price-v3";
 const DAY = 86400000;
 const DAILY_INFLOW_ZEC = 144;
 const MINI_COUNT = 5;
-const CACHE_KEY = "zcg-dashboard-v10";
+const CACHE_KEY = "zcg-dashboard-v11";
 const MIN_MONTH = "2021-01"; // no data before this
-const recipientView = { range: "all", size: "all" };
+const recipientView = { range: "all", size: "all", group: "all" };
+const STIPEND_RECIPIENT = "ZCG Committee (stipends)";
+ 
+/* Spending types used by the recipients table and the Payouts card.
+ * Colors are mid-tones that read in both light and dark mode. */
+const SPEND_TYPES = {
+  Grant: { label: "Grants", color: "#f4b728", group: "grants" },
+  Security: { label: "Security", color: "#c66c36", group: "security" },
+  Event: { label: "Events", color: "#648bb9", group: "events" },
+  Stipend: { label: "Committee stipends", color: "#22805c", group: "ops" },
+  Notetaker: { label: "Notetaker", color: "#b789a5", group: "ops" },
+  Contractor: { label: "Contractors", color: "#926c41", group: "ops" },
+  Discretionary: { label: "Other discretionary", color: "#7d7c92", group: "ops" },
+};
+/* Event sheet rows that look like they are already paid out of the
+ * Disc. Budget are matched on these words, so they are not counted twice. */
+const EVENT_TEXT = /sponsor|event|conference|summit|hackathon|meetup|zcon|booth|expo|travel/i;
+const EVENT_STOPWORDS = new Set([
+  "zcash", "conference", "summit", "event", "events", "week", "community",
+  "sponsorship", "meetup", "hackathon", "with", "from", "2023", "2024",
+  "2025", "2026", "2027", "the", "and",
+]);
 const chartRanges = { payout: "12m", approval: "12m" };
 const statusLabels = {
   completed: "Completed",
@@ -45,7 +66,7 @@ const statusLabels = {
   discussion: "Discussion required",
   rejected: "Declined",
 };
-
+ 
 const sheets = {
   dashboard: "ZCG Dashboard",
   grants: "ZCG Grants",
@@ -56,7 +77,7 @@ const sheets = {
   contractors: "ZCG IC Payouts",
   discbudget: "ZCG 2026 Disc. Budget",
 };
-
+ 
 const SECURITY_SHEET = new RegExp(
   sheets.discbudget.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   "i"
@@ -67,7 +88,7 @@ const MONTH_NAMES = [
   "jan", "feb", "mar", "apr", "may", "jun",
   "jul", "aug", "sep", "oct", "nov", "dec",
 ];
-
+ 
 /* ========================================================================
  * State & helpers
  * ===================================================================== */
@@ -84,7 +105,7 @@ const charts = new Map();
 const tableStates = new Map();
 const renderedPages = new Set();
 const recipientSort = { key: "total", dir: -1 };
-
+ 
 const $ = (id) => document.getElementById(id);
 const escapeHTML = (value) =>
   String(value ?? "").replace(
@@ -116,7 +137,7 @@ const norm = (value) =>
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
-
+ 
 function date(value) {
   if (value === null || value === undefined || value === "") return null;
   if (value instanceof Date) return Number.isNaN(+value) ? null : value;
@@ -136,7 +157,7 @@ function date(value) {
   const result = new Date(value);
   return Number.isNaN(+result) ? null : result;
 }
-
+ 
 const iso = (value) => date(value)?.toISOString() || null;
 const fmtDate = (value) => date(value)?.toLocaleDateString() || "—";
 const monthKey = (value) => {
@@ -145,126 +166,7 @@ const monthKey = (value) => {
     ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
     : "";
 };
-
-/* Returns every dated Disc. Budget payment. `match` marks the rows that
- * look like security spending (bounties, audits) for the Security page. */
-function parseBudgetSheet(workbook) {
-  console.group("🔍 Debug: Disc. Budget & Security Audit");
-  console.log("All workbook sheet names:", workbook.SheetNames);
-  console.log("Using SECURITY_SHEET regex:", SECURITY_SHEET);
-
-  const name = workbook.SheetNames.find((n) => SECURITY_SHEET.test(n));
-  if (!name) {
-    console.warn("❌ Disc. budget sheet NOT found matching regex! Available tabs:", workbook.SheetNames);
-    console.groupEnd();
-    return [];
-  }
-  console.log("✅ Matched Disc. budget sheet:", name);
-
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
-    header: 1,
-    raw: true,
-    blankrows: true,
-    defval: "",
-  });
-  console.log(`Loaded ${rows.length} total raw rows from sheet.`);
-
-  const headerIndex = rows.findIndex((row) => {
-    const cells = row.map(norm);
-    return (
-      cells.some((c) => /^date|^paid/.test(c)) &&
-      cells.some((c) => /usd/.test(c)) &&
-      cells.some((c) => /recipient|payee|contractor|name/.test(c))
-    );
-  });
-
-  if (headerIndex < 0) {
-    console.warn("❌ Header row not recognized! Inspecting first 10 rows:", rows.slice(0, 10));
-    console.groupEnd();
-    return [];
-  }
-
-  const headers = rows[headerIndex].map(norm);
-  console.log(`✅ Header detected at row index ${headerIndex}:`, headers);
-
-  const find = (pattern, exclude) =>
-    headers.findIndex((h) => pattern.test(h) && !(exclude && exclude.test(h)));
-
-  const c = {
-    date: find(/^date|^paid/),
-    recipient: find(/recipient|payee|contractor|^name/),
-    desc: find(/description|purpose|item|memo|notes?|project|title/),
-    rate: find(/zec\s*\/\s*usd|rate|price/),
-    usd: find(/usd/, /\/|rate|price/),
-    zec: find(/^zec/, /\/|rate|price|usd/),
-  };
-
-  console.log("Column index mapping:", c);
-
-  const out = [];
-  let skippedNoDate = 0;
-  let skippedNoUsd = 0;
-
-  rows.slice(headerIndex + 1).forEach((row, i) => {
-    // Skip empty lines
-    if (!row.some((cell) => cell !== "" && cell != null)) return;
-
-    const text = row.join(" ");
-    const description = String((c.desc >= 0 ? row[c.desc] : "") || text).trim();
-    const zecAmount = c.zec >= 0 ? number(row[c.zec]) : 0;
-    const rate = c.rate >= 0 ? number(row[c.rate]) : 0;
-    const parsedDate = c.date >= 0 ? iso(row[c.date]) : null;
-    const rawUsd = c.usd >= 0 ? number(row[c.usd]) : 0;
-    const computedUsd = rawUsd || zecAmount * rate;
-    const matchesSecurity = SECURITY_TEXT.test(text);
-
-    // If it mentions bounty/security, log it immediately so you can see its values!
-    if (/bount|audit|secur/i.test(text)) {
-      console.log(`🎯 Found security candidate row #${i + headerIndex + 1}:`, {
-        rawDate: row[c.date],
-        parsedDate,
-        description,
-        recipient: row[c.recipient],
-        usd: computedUsd,
-        matchesSecurityText: matchesSecurity,
-        fullRow: row,
-      });
-    }
-
-    if (!parsedDate) {
-      if (matchesSecurity) console.warn("⚠️ Security candidate dropped: missing or unparseable Date!", row);
-      skippedNoDate++;
-      return;
-    }
-
-    if (computedUsd <= 0) {
-      if (matchesSecurity) console.warn("⚠️ Security candidate dropped: USD amount <= 0!", row);
-      skippedNoUsd++;
-      return;
-    }
-
-    out.push({
-      type: securityType(text),
-      project: description,
-      recipient: c.recipient >= 0 ? String(row[c.recipient] ?? "").trim() : "",
-      date: parsedDate,
-      usd: computedUsd,
-      zec: zecAmount,
-      rate,
-      match: matchesSecurity,
-    });
-  });
-
-  const securityMatches = out.filter((r) => r.match);
-  console.log(`Summary: ${out.length} valid dated rows, ${securityMatches.length} flagged as security.`);
-  console.log("Matched security rows:", securityMatches);
-  if (skippedNoDate) console.log(`Skipped ${skippedNoDate} rows missing dates.`);
-  if (skippedNoUsd) console.log(`Skipped ${skippedNoUsd} rows with 0 or missing USD.`);
-  console.groupEnd();
-
-  return out;
-}
-
+ 
 function safeURL(value) {
   try {
     const url = new URL(value);
@@ -273,7 +175,7 @@ function safeURL(value) {
     return null;
   }
 }
-
+ 
 function readCache(key) {
   try {
     return JSON.parse(localStorage.getItem(key));
@@ -281,7 +183,7 @@ function readCache(key) {
     return null;
   }
 }
-
+ 
 function writeCache(key, value) {
   try {
     localStorage.setItem(
@@ -292,7 +194,7 @@ function writeCache(key, value) {
     // Dashboard still works when storage is blocked or full.
   }
 }
-
+ 
 function debounce(fn, delay = 160) {
   let timer;
   return (...args) => {
@@ -300,7 +202,7 @@ function debounce(fn, delay = 160) {
     timer = setTimeout(() => fn(...args), delay);
   };
 }
-
+ 
 function loadXLSX() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
   if (libraryPromise) return libraryPromise;
@@ -317,11 +219,11 @@ function loadXLSX() {
   });
   return libraryPromise;
 }
-
+ 
 function yearStart() {
   return new Date(new Date().getFullYear(), 0, 1);
 }
-
+ 
 function ytdRows(rows) {
   const start = yearStart();
   const now = new Date();
@@ -330,7 +232,7 @@ function ytdRows(rows) {
     return d && d >= start && d <= now;
   });
 }
-
+ 
 /* ========================================================================
  * Spreadsheet parsing
  * ===================================================================== */
@@ -342,7 +244,7 @@ function decision(value) {
   if (/approved/.test(text)) return "approved";
   return "unknown";
 }
-
+ 
 function objects(rows, headerIndex = 0) {
   const headers = (rows[headerIndex] || []).map((value) =>
     String(value ?? "").trim(),
@@ -358,13 +260,13 @@ function objects(rows, headerIndex = 0) {
       ),
     );
 }
-
+ 
 function securityType(text) {
   if (/bount/i.test(text)) return "Bounty";
   if (/audit|pentest/i.test(text)) return "Audit";
   return "Security";
 }
-
+ 
 /* Returns every dated Disc. Budget payment. `match` marks the rows that
  * look like security spending (bounties, audits) for the Security page. */
 function parseBudgetSheet(workbook) {
@@ -402,7 +304,7 @@ function parseBudgetSheet(workbook) {
   };
   c.usd = find(/usd/, /\/|rate|price/);
   c.zec = find(/^zec/, /\/|rate|price|usd/);
-
+ 
   const out = rows
     .slice(headerIndex + 1)
     .map((row) => {
@@ -429,7 +331,7 @@ function parseBudgetSheet(workbook) {
   );
   return out;
 }
-
+ 
 function buildData(workbook) {
   const raw = {};
   for (const [key, name] of Object.entries(sheets)) {
@@ -443,11 +345,11 @@ function buildData(workbook) {
         })
       : [];
   }
-
+ 
   if (!raw.dashboard.length || !raw.grants.length) {
     throw new Error("Required dashboard or grants sheet is missing.");
   }
-
+ 
   const grantRows = objects(raw.grants);
   const trackingHeaders = (raw.tracking[0] || []).map(norm);
   const forumIndex = trackingHeaders.findIndex(
@@ -455,7 +357,7 @@ function buildData(workbook) {
   );
   const metadata = new Map();
   const approvals = [];
-
+ 
   for (const row of raw.tracking.slice(1)) {
     const project = String(row[1] || "").trim();
     if (!project) continue;
@@ -463,7 +365,7 @@ function buildData(workbook) {
     const key = norm(project);
     const previous = metadata.get(key);
     const submitted = iso(row[0]);
-
+ 
     metadata.set(key, {
       submitted:
         previous?.submitted && submitted
@@ -474,7 +376,7 @@ function buildData(workbook) {
       decision: status,
       forum: safeURL(row[forumIndex]) || previous?.forum || null,
     });
-
+ 
     const approved = iso(row[6]);
     if (status === "approved" && approved) {
       approvals.push({
@@ -484,11 +386,11 @@ function buildData(workbook) {
       });
     }
   }
-
+ 
   const grantMap = new Map();
   const payouts = [];
   const totals = {};
-
+ 
   for (const row of grantRows) {
     const project = String(row.Project || "").trim();
     const grantee = String(
@@ -546,7 +448,7 @@ function buildData(workbook) {
       });
     }
   }
-
+ 
   for (const row of raw.tracking.slice(1)) {
     const status = decision(row[5]);
     if (!["rejected", "discussion"].includes(status)) continue;
@@ -570,7 +472,7 @@ function buildData(workbook) {
       lastPaid: null,
     });
   }
-
+ 
   const grants = [...grantMap.values()]
     .filter((grant) => grant.decision !== "excluded")
     .map((grant) => {
@@ -587,7 +489,7 @@ function buildData(workbook) {
         search: norm(`${grant.project} ${grant.grantee} ${grant.category}`),
       };
     });
-
+ 
   const contractors = objects(raw.contractors)
     .filter((row) => row.Project || row["Independent Contractor (IC)"])
     .map((row) => ({
@@ -598,7 +500,7 @@ function buildData(workbook) {
       zec: number(row["ZEC Disbursed"]),
       rate: number(row["ZEC/USD"]),
     }));
-
+ 
   const stipends = objects(raw.stipends)
     .filter((row) => date(row.Date))
     .map((row) => ({
@@ -614,7 +516,7 @@ function buildData(workbook) {
       zec: number(row["ZEC Amount"] || row.ZEC),
       rate: 0,
     }));
-
+ 
   for (const row of contractors) {
     if (row.date) {
       payouts.push({
@@ -635,9 +537,9 @@ function buildData(workbook) {
       project: "Stipend",
     });
   }
-
+ 
   const budgetRows = parseBudgetSheet(workbook);
-
+ 
   /* Every Disc. Budget payment counts as spending (not only security). */
   for (const row of budgetRows) {
     payouts.push({
@@ -648,7 +550,7 @@ function buildData(workbook) {
       project: row.project || "Discretionary budget",
     });
   }
-
+ 
   const security = [
     ...contractors
       .filter(
@@ -662,7 +564,14 @@ function buildData(workbook) {
       })),
     ...budgetRows.filter((row) => row.match),
   ].map(({ match, ...row }) => row);
-
+ 
+  /* Keep all Disc. Budget rows so the recipients table can list the people
+   * behind the "ZCG Discretionary Budget" lump sum. */
+  const budget = budgetRows.map(({ match, ...row }) => ({
+    ...row,
+    security: match,
+  }));
+ 
   const categories = {};
   for (const row of raw.funds.slice(2)) {
     const label = String(row[14] || "").trim();
@@ -671,7 +580,7 @@ function buildData(workbook) {
       categories[label] = (categories[label] || 0) + amount;
     }
   }
-
+ 
   const headerIndex = raw.funds.findIndex((row) => {
     const text = norm(row.join(" "));
     return text.includes("recipient") && text.includes("paid out");
@@ -694,10 +603,10 @@ function buildData(workbook) {
   const recipients = [...recipientTotals]
     .map(([name, v]) => ({ name, ...v, total: v.paid + v.future }))
     .filter((row) => row.total > 0);
-
+ 
   const get = (label) =>
     raw.dashboard.find((row) => norm(row[0]).includes(norm(label)))?.[1];
-
+ 
   return {
     fetched: new Date().toISOString(),
     sourceTime: iso(get("Block time (UTC)")),
@@ -716,10 +625,11 @@ function buildData(workbook) {
     contractors,
     stipends,
     security,
+    budget,
     liquidity: raw.liquidity,
   };
 }
-
+ 
 /* ========================================================================
  * Events sheet (separate published spreadsheet)
  * ===================================================================== */
@@ -733,7 +643,7 @@ function parseEventDate(text) {
     new Date().getFullYear();
   return new Date(year, month, Number(match[2]) || 1).toISOString();
 }
-
+ 
 function eventType(text) {
   const t = norm(text);
   if (!t || t === "-" || /^no\b/.test(t)) return "Other";
@@ -746,7 +656,7 @@ function eventType(text) {
     .sort((a, b) => a[1] - b[1]);
   return found.length ? found[0][0] : "Other";
 }
-
+ 
 function parseEvents(workbook) {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return [];
@@ -794,7 +704,7 @@ function parseEvents(workbook) {
   }
   return out;
 }
-
+ 
 async function loadEvents() {
   if (eventsPromise) return eventsPromise;
   eventsPromise = (async () => {
@@ -814,7 +724,11 @@ async function loadEvents() {
       events = parsed;
       writeCache(EVENTS_KEY, parsed);
       renderedPages.delete("events");
-      if (activePage === "events") renderActivePage();
+      /* The overview includes event spending, so redraw it too. */
+      renderedPages.delete("dashboard");
+      if (activePage === "events" || activePage === "dashboard") {
+        renderActivePage();
+      }
     } catch (error) {
       console.error(error);
       if (!events && activePage === "events") {
@@ -827,7 +741,7 @@ async function loadEvents() {
   })();
   return eventsPromise;
 }
-
+ 
 /* ========================================================================
  * Data lifecycle: show cache immediately; refresh stale data once.
  * ===================================================================== */
@@ -838,7 +752,7 @@ async function refreshData() {
     ? "Showing cached data · Checking for updates…"
     : "Downloading spreadsheet…";
   loadEvents();
-
+ 
   refreshing = (async () => {
     try {
       const [, response] = await Promise.all([
@@ -875,7 +789,7 @@ async function refreshData() {
   })();
   return refreshing;
 }
-
+ 
 function updateStatus() {
   if (!data) return;
   const source = data.sourceTime
@@ -884,7 +798,7 @@ function updateStatus() {
   $("dataStatus").textContent =
     source + `Downloaded: ${date(data.fetched).toLocaleString()}`;
 }
-
+ 
 /* ========================================================================
  * Dates, comparisons, and monthly series
  * ===================================================================== */
@@ -894,21 +808,21 @@ function sumBetween(records, start, end) {
     return d && d >= start && d < end ? sum + record.amount : sum;
   }, 0);
 }
-
+ 
 function countBetween(records, start, end) {
   return records.filter((record) => {
     const d = date(record.date);
     return d && d >= start && d < end;
   }).length;
 }
-
+ 
 function months(count = 12) {
   const now = new Date();
   return Array.from({ length: count }, (_, index) =>
     monthKey(new Date(now.getFullYear(), now.getMonth() - count + index + 1)),
   );
 }
-
+ 
 function monthly(records, keys, value = "amount") {
   const totals = new Map(keys.map((key) => [key, 0]));
   for (const record of records) {
@@ -919,7 +833,7 @@ function monthly(records, keys, value = "amount") {
   }
   return keys.map((key) => totals.get(key));
 }
-
+ 
 function changeBadge(current, previous, label) {
   if (!previous) {
     return `<span class="badge">${current ? "New activity" : "No change"}
@@ -930,7 +844,7 @@ function changeBadge(current, previous, label) {
     ${Math.abs(percent).toFixed(0)}% ${percent >= 0 ? "more" : "less"}
     than ${escapeHTML(label)}</span>`;
 }
-
+ 
 function bar(parts) {
   const total = parts.reduce((sum, item) => sum + Math.max(item.value, 0), 0);
   return `<div class="segment-bar" aria-hidden="true">
@@ -938,15 +852,15 @@ function bar(parts) {
       .map(
         (item) => `<span class="${item.className}" style="width:${
           total ? (Math.max(item.value, 0) / total) * 100 : 0
-        }%"></span>`,
+        }%;${item.style || ""}"></span>`,
       )
       .join("")}
   </div>`;
 }
-
+ 
 const stat = (label, value) =>
   `<div class="stat-row"><span>${label}</span><strong>${value}</strong></div>`;
-
+ 
 function nextMilestone(grant) {
   return grant.milestones
     .filter((item) => !item.paid)
@@ -956,7 +870,7 @@ function nextMilestone(grant) {
       return (da ? +da : Infinity) - (db ? +db : Infinity);
     })[0];
 }
-
+ 
 function isOverdue(item) {
   if (!item || item.paid) return false;
   const due = date(item.estimate || item.due);
@@ -964,12 +878,114 @@ function isOverdue(item) {
   today.setHours(0, 0, 0, 0);
   return due && due < today;
 }
-
+ 
+/* ========================================================================
+ * Spending ledger: every ZCG cost as one list of records
+ *   { date, amount, name, type, project, future }
+ * Used by the Payouts card, coverage estimate, and recipients table so
+ * the numbers always agree with each other.
+ * ===================================================================== */
+function eventTokens(name) {
+  return norm(name)
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 4 && !EVENT_STOPWORDS.has(t));
+}
+ 
+/* True when a Disc. Budget row is most likely the same payment as a row in
+ * the Events sheet (same distinctive word + event wording or same amount). */
+function isEventDuplicate(row, eventList) {
+  const text = norm(`${row.project} ${row.recipient}`);
+  return eventList.some((e) => {
+    if (!e.tokens.some((t) => text.includes(t))) return false;
+    const sameAmount = e.usd && Math.abs(e.usd - row.usd) / e.usd < 0.02;
+    return sameAmount || EVENT_TEXT.test(text);
+  });
+}
+ 
+function ledger() {
+  if (!data) return [];
+  const out = [];
+  const add = (record) => {
+    if (record.amount > 0) out.push(record);
+  };
+ 
+  for (const g of data.grants) {
+    for (const m of g.milestones) {
+      if (m.paid) {
+        add({ date: m.paid, amount: m.amount, name: g.grantee, type: "Grant", project: g.project });
+      } else if (g.decision === "approved") {
+        add({ date: m.estimate || m.due, amount: m.amount, name: g.grantee, type: "Grant", project: g.project, future: true });
+      }
+    }
+  }
+ 
+  for (const row of data.contractors) {
+    if (!row.date) continue;
+    const text = `${row.project} ${row.recipient}`;
+    const type = NOTES_TEXT.test(row.project)
+      ? "Notetaker"
+      : SECURITY_TEXT.test(text)
+        ? "Security"
+        : "Contractor";
+    add({ date: row.date, amount: row.usd, name: row.recipient || row.project, type, project: row.project });
+  }
+ 
+  /* Committee stipends are shown as one combined line. */
+  for (const row of data.stipends) {
+    add({ date: row.date, amount: row.usd, name: STIPEND_RECIPIENT, type: "Stipend", project: row.recipient });
+  }
+ 
+  /* Events: "Grant"-funded events are already in the grants sheet, so only
+   * sponsorships, reimbursements and other event costs are added here. */
+  const eventList = (events || [])
+    .filter((e) => e.type !== "Grant" && e.usd > 0)
+    .map((e) => ({ ...e, tokens: eventTokens(e.name) }));
+  for (const e of eventList) {
+    add({
+      date: e.date,
+      amount: e.usd,
+      name: e.name,
+      type: "Event",
+      project: e.typeText,
+      future: e.status !== "done",
+    });
+  }
+ 
+  for (const row of data.budget || []) {
+    if (!row.security && eventList.length && isEventDuplicate(row, eventList)) {
+      continue; // already counted from the Events sheet
+    }
+    add({
+      date: row.date,
+      amount: row.usd,
+      name: row.recipient || row.project || "Unknown",
+      type: row.security ? "Security" : "Discretionary",
+      project: row.project,
+    });
+  }
+  return out;
+}
+ 
+const paidRecords = (records) => records.filter((r) => !r.future);
+ 
+function sumBy(records, start, end, predicate = () => true) {
+  let total = 0;
+  let count = 0;
+  for (const r of records) {
+    const d = date(r.date);
+    if (d && d >= start && d < end && predicate(r)) {
+      total += r.amount;
+      count++;
+    }
+  }
+  return { total, count };
+}
+ 
 /* ========================================================================
  * Navigation: native hash history
  * ===================================================================== */
 const legacyRoutes = { auditpayments: "security", payments: "dashboard" };
-
+ 
 const pageTitles = {
   dashboard: "Overview",
   grants: "Grants",
@@ -979,7 +995,7 @@ const pageTitles = {
   notetaker: "Notetaker",
   liquidity: "Liquidity",
 };
-
+ 
 const pageTargets = {
   grants: "grantsContainer",
   security: "securityContent",
@@ -988,7 +1004,7 @@ const pageTargets = {
   liquidity: "liquidityContent",
   events: "eventsContent",
 };
-
+ 
 function route() {
   const [rawPage, query = ""] = location.hash.slice(1).split("?");
   const page = legacyRoutes[rawPage] || rawPage;
@@ -1004,7 +1020,7 @@ function route() {
     }
   });
   document.title = `${pageTitles[activePage]} · Zcash Community Grants`;
-
+ 
   if (activePage === "grants") {
     const params = new URLSearchParams(query);
     for (const [name, id] of [
@@ -1026,7 +1042,7 @@ function route() {
   renderActivePage();
   openGrantFromHash();
 }
-
+ 
 function renderActivePage() {
   /* Events come from their own sheet and do not need the main data. */
   if (activePage === "events") {
@@ -1064,7 +1080,7 @@ function renderActivePage() {
   renderers[activePage]?.();
   renderedPages.add(activePage);
 }
-
+ 
 /* ========================================================================
  * Overview
  * ===================================================================== */
@@ -1075,14 +1091,14 @@ function monthLabel(key, long = false) {
     long ? { month: "long", year: "numeric" } : { month: "short" },
   );
 }
-
+ 
 function miniChartHTML(id, title, keys, note) {
   return `<div class="spark-title">${title}
       <span class="muted">· ${monthLabel(keys[0], true)} – ${monthLabel(keys.at(-1), true)}</span></div>
     <div class="mini-chart"><canvas id="${id}"></canvas></div>
     <p class="spark-caption">${note}</p>`;
 }
-
+ 
 function drawMiniChart(id, keys, values, label, money = true) {
   const colors = chartColors();
   const last = keys.length - 1;
@@ -1120,36 +1136,67 @@ function drawMiniChart(id, keys, values, label, money = true) {
     },
   });
 }
-
+ 
+/* Compact "▲ 12% vs …" badge for side-by-side comparisons. */
+function deltaBadge(current, previous, label) {
+  if (!previous) {
+    return `<span class="badge" title="Nothing paid in ${escapeHTML(label)}">
+      ${current ? "New" : "—"} vs ${escapeHTML(label)}</span>`;
+  }
+  const percent = ((current - previous) / previous) * 100;
+  return `<span class="badge" title="${escapeHTML(label)}: ${usd(previous)}">
+    ${percent >= 0 ? "▲" : "▼"} ${Math.abs(percent).toFixed(0)}% vs ${escapeHTML(label)}</span>`;
+}
+ 
 function renderOverview() {
   const now = new Date();
   const end = new Date(+now + 1);
   const start30 = new Date(+now - 30 * DAY);
   const previous30 = new Date(+now - 60 * DAY);
   const start12 = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-  const grantPayoutRecords = data.payouts.filter((p) => p.kind === "grant");
-  const currentPayouts = sumBetween(data.payouts, start30, end);
-  const previousPayouts = sumBetween(data.payouts, previous30, start30);
-  const grantPayouts = sumBetween(grantPayoutRecords, start30, end);
-  const grantCount = countBetween(grantPayoutRecords, start30, end);
-  const burn = sumBetween(data.payouts, start12, end) / 12;
-  const t = data.treasury;
-  const zecValue = t.zec * t.price;
-  const treasury = zecValue + t.usd;
-  const income = DAILY_INFLOW_ZEC * 30 * t.price;
-  const free = treasury - t.liabilities;
-  const committed = treasury > 0 ? (t.liabilities / treasury) * 100 : 0;
-  const approved = data.grants.filter((g) => g.decision === "approved");
-  const complete = approved.filter((g) => g.status === "completed").length;
-  const active = approved.filter((g) => g.status === "in-progress").length;
-  const review = approved.length - complete - active;
-  const overdueGrants = approved.filter((g) => g.milestones.some(isOverdue)).length;
   const yStart = yearStart();
   const previousYearStart = new Date(now.getFullYear() - 1, 0, 1);
   const previousYearEnd = new Date(
     now.getFullYear() - 1, now.getMonth(), now.getDate(),
     now.getHours(), now.getMinutes(),
   );
+  const paid = paidRecords(ledger());
+ 
+  /* Payouts: last 30 days vs YTD, split by spending type. */
+  const p30 = sumBy(paid, start30, end).total;
+  const pPrev30 = sumBy(paid, previous30, start30).total;
+  const pYtd = sumBy(paid, yStart, end).total;
+  const pPrevYtd = sumBy(paid, previousYearStart, previousYearEnd).total;
+  const typeRows = Object.entries(SPEND_TYPES)
+    .map(([type, meta]) => ({
+      ...meta,
+      d30: sumBy(paid, start30, end, (r) => r.type === type),
+      ytd: sumBy(paid, yStart, end, (r) => r.type === type),
+    }))
+    .filter((row) => row.d30.total || row.ytd.total);
+  const grants30 = typeRows.find((r) => r.group === "grants")?.d30 || { total: 0, count: 0 };
+  const grantsYtd = typeRows.find((r) => r.group === "grants")?.ytd || { total: 0, count: 0 };
+  const daysYtd = Math.max(1, Math.ceil((now - yStart) / DAY));
+  const t = data.treasury;
+  const income30 = DAILY_INFLOW_ZEC * 30 * t.price;
+  const incomeYtd = DAILY_INFLOW_ZEC * daysYtd * t.price;
+  const avg = (x) => usd(x.count ? x.total / x.count : 0);
+  const cmp = (label, a, b, cls = "") =>
+    `<tr class="${cls}"><th scope="row">${label}</th><td>${a}</td><td>${b}</td></tr>`;
+ 
+  /* Treasury */
+  const burn = sumBy(paid, start12, end).total / 12;
+  const zecValue = t.zec * t.price;
+  const treasury = zecValue + t.usd;
+  const free = treasury - t.liabilities;
+  const committed = treasury > 0 ? (t.liabilities / treasury) * 100 : 0;
+ 
+  /* Grants */
+  const approved = data.grants.filter((g) => g.decision === "approved");
+  const complete = approved.filter((g) => g.status === "completed").length;
+  const active = approved.filter((g) => g.status === "in-progress").length;
+  const review = approved.length - complete - active;
+  const overdueGrants = approved.filter((g) => g.milestones.some(isOverdue)).length;
   const currentApprovals = data.approvals.filter(
     (a) => date(a.date) >= yStart && date(a.date) <= now,
   );
@@ -1159,9 +1206,8 @@ function renderOverview() {
   const approvedBudget = currentApprovals.reduce(
     (sum, a) => sum + (data.totals[norm(a.project)] || 0), 0,
   );
-  const ytdPaid = sumBetween(data.payouts, yStart, end);
   const keys = months();
-
+ 
   $("overviewMetrics").innerHTML = `
     <article class="card treasury-card">
       <div class="metric-label">Total treasury value</div>
@@ -1182,28 +1228,50 @@ function renderOverview() {
       ${stat("Uncommitted treasury", usd(free))}
       ${stat("Gross spending coverage", burn > 0 ? `~${(treasury / burn).toFixed(1)} months` : "—")}
       <p class="spark-caption">
-        Coverage uses ${usd(burn)}/month trailing average; excludes income.
+        Coverage uses ${usd(burn)}/month trailing average of all ZCG costs; excludes income.
       </p>
     </article>
-
+ 
     <article class="card">
-      <div class="metric-label">Payouts · last 30 days</div>
-      <div class="metric-value">${usd(currentPayouts)}</div>
-      ${changeBadge(currentPayouts, previousPayouts, `the previous 30 days (${usd(previousPayouts)})`)}
-      ${stat("Grant milestones", `${usd(grantPayouts)} · ${grantCount} paid`)}
-      ${stat("Contractors, stipends & discretionary", usd(currentPayouts - grantPayouts))}
-      ${stat("Avg grant payout", usd(grantCount ? grantPayouts / grantCount : 0))}
-      <div class="divider"></div>
-      ${stat("Est. protocol income", usd(income))}
-      ${stat("Est. net flow", usd(income - currentPayouts))}
-      ${stat("All payouts this year", usd(ytdPaid))}
+      <div class="metric-label">Payouts</div>
+      <div class="dual-metric">
+        <div>
+          <span class="dual-label">Last 30 days</span>
+          <div class="metric-value">${usd(p30)}</div>
+          ${deltaBadge(p30, pPrev30, "prev. 30d")}
+        </div>
+        <div>
+          <span class="dual-label">Year to date</span>
+          <div class="metric-value">${usd(pYtd)}</div>
+          ${deltaBadge(pYtd, pPrevYtd, `same period ${now.getFullYear() - 1}`)}
+        </div>
+      </div>
+      <table class="compare-table">
+        <thead><tr><th scope="col"><span class="visually-hidden">Type</span></th>
+          <th scope="col">30 days</th><th scope="col">YTD</th></tr></thead>
+        <tbody>
+          ${typeRows
+            .map((r) =>
+              cmp(
+                `<span class="dot" style="background:${r.color}"></span>${r.label}`,
+                usd(r.d30.total),
+                usd(r.ytd.total),
+              ),
+            )
+            .join("")}
+          ${cmp("Grant milestones paid", grants30.count, grantsYtd.count, "sep")}
+          ${cmp("Avg milestone payout", avg(grants30), avg(grantsYtd))}
+          ${cmp("Est. protocol income", usd(income30), usd(incomeYtd), "sep")}
+          ${cmp("Est. net flow", usd(income30 - p30), usd(incomeYtd - pYtd))}
+        </tbody>
+      </table>
       ${miniChartHTML(
         "miniPayouts", "Total payouts per month", keys,
-        `Hover a bar for the exact amount. Gray = current month so far.
-         Income = ${DAILY_INFLOW_ZEC} ZEC/day × 30 at current price.`,
+        `All ZCG costs. Gray = current month so far. Income = ${DAILY_INFLOW_ZEC}
+         ZEC/day at today's price (an estimate, not actual receipts).`,
       )}
     </article>
-
+ 
     <article class="card">
       <div class="metric-label">Approved grants · all time</div>
       <div class="metric-value">${approved.length}</div>
@@ -1227,14 +1295,14 @@ function renderOverview() {
         "Hover a bar for the count. Gray = current month so far.",
       )}
     </article>`;
-
-  drawMiniChart("miniPayouts", keys, monthly(data.payouts, keys), "Paid out");
+ 
+  drawMiniChart("miniPayouts", keys, monthly(paid, keys), "Paid out");
   drawMiniChart("miniApprovals", keys, monthly(data.approvals, keys, null), "Approved", false);
   renderOverviewCharts();
   renderPriceChart();
   renderRecipients();
 }
-
+ 
 /* ========================================================================
  * Charts (colors come from CSS variables, so dark mode works)
  * ===================================================================== */
@@ -1249,7 +1317,7 @@ function chartColors() {
     ink: get("--ink"),
   };
 }
-
+ 
 function makeChart(id, config) {
   if (!window.Chart || !$(id)) return;
   charts.get(id)?.destroy();
@@ -1290,7 +1358,7 @@ function makeChart(id, config) {
   });
   charts.set(id, chart);
 }
-
+ 
 function chartMonthKeys(records, range) {
   const current = monthKey(new Date());
   if (range === "12m") return months();
@@ -1310,7 +1378,7 @@ function chartMonthKeys(records, range) {
   }
   return keys;
 }
-
+ 
 function renderOverviewCharts() {
   const colors = chartColors();
   const usdAxis = { ticks: { color: colors.text, callback: (v) => usd(v) } };
@@ -1320,7 +1388,7 @@ function renderOverviewCharts() {
     grid: { drawOnChartArea: false },
     ticks: { color: colors.text, precision: 0 },
   };
-
+ 
   const grants = data.payouts.filter((item) => item.kind === "grant");
   const payoutKeys = chartMonthKeys(grants, chartRanges.payout);
   makeChart("payoutChart", {
@@ -1348,7 +1416,7 @@ function renderOverviewCharts() {
     },
     options: { scales: { y: usdAxis, count: countAxis } },
   });
-
+ 
   const approvalKeys = chartMonthKeys(data.approvals, chartRanges.approval);
   const budgetRecords = data.approvals.map((item) => ({
     ...item,
@@ -1379,7 +1447,7 @@ function renderOverviewCharts() {
     },
     options: { scales: { y: usdAxis, count: countAxis } },
   });
-
+ 
   const entries = Object.entries(data.categories).sort((a, b) => b[1] - a[1]);
   const palette = [
     "#f4b728",
@@ -1428,7 +1496,7 @@ function renderOverviewCharts() {
     )
     .join("");
 }
-
+ 
 async function renderPriceChart() {
   try {
     const cached = readCache(PRICE_KEY);
@@ -1496,63 +1564,99 @@ async function renderPriceChart() {
       "Price history unavailable. CoinGecko may be rate-limiting requests.";
   }
 }
-
+ 
 /* ========================================================================
  * Recipients table (overview)
  * ===================================================================== */
 const RECIPIENT_RANGES = [
-  ["3m", "3 months"], ["1y", "1 year"], ["2y", "2 years"],
+  ["ytd", "YTD"], ["3m", "3 months"], ["1y", "1 year"], ["2y", "2 years"],
   ["5y", "5 years"], ["all", "All time"],
 ];
 const RECIPIENT_SIZES = [
-  ["all", "Any size"], ["small", "Under $50k"],
-  ["medium", "$50k–$250k"], ["large", "Over $250k"],
+  ["all", "Any size"], ["small", "Under $50k"], ["medium", "$50k–$250k"],
+  ["large", "$250k–$500k"], ["xl", "$500k+"],
 ];
-
+const RECIPIENT_GROUPS = [
+  ["all", "All"], ["grants", "Grants"], ["security", "Security"],
+  ["events", "Events"], ["ops", "Committee & ops"],
+];
+ 
 function rangeStart(range) {
+  if (range === "ytd") return yearStart();
   const n = new Date();
   const back = { "3m": [0, 3], "1y": [1, 0], "2y": [2, 0], "5y": [5, 0] }[range];
   return back
     ? new Date(n.getFullYear() - back[0], n.getMonth() - back[1], n.getDate())
     : null;
 }
-
+ 
+/* One row per recipient: paid within the period + all future commitments.
+ * Built from the ledger for every period (including All time), so the
+ * "ZCG Discretionary Budget" lump sum is replaced by its actual recipients. */
 function recipientRows() {
   const start = rangeStart(recipientView.range);
-  if (!start) return data.recipients.map((r) => ({ ...r }));
-  const map = new Map();
-  const entry = (name) => {
-    if (!map.has(name)) map.set(name, { name, paid: 0, future: 0 });
-    return map.get(name);
-  };
   const now = new Date();
-  for (const p of data.payouts) {
-    const d = date(p.date);
-    if (d && d >= start && d <= now) entry(p.name || "Unknown").paid += p.amount;
-  }
-  for (const g of data.grants) {
-    if (g.decision !== "approved") continue;
-    for (const m of g.milestones) if (!m.paid) entry(g.grantee).future += m.amount;
+  const map = new Map();
+  for (const r of ledger()) {
+    let field = "future";
+    if (!r.future) {
+      const d = date(r.date);
+      if (!d || d > now || (start && d < start)) continue;
+      field = "paid";
+    }
+    const key = norm(r.name) || "unknown";
+    if (!map.has(key)) {
+      map.set(key, { name: r.name || "Unknown", paid: 0, future: 0, types: {} });
+    }
+    const row = map.get(key);
+    row[field] += r.amount;
+    row.types[r.type] = (row.types[r.type] || 0) + r.amount;
   }
   return [...map.values()]
-    .map((r) => ({ ...r, total: r.paid + r.future }))
+    .map((r) => ({
+      ...r,
+      total: r.paid + r.future,
+      /* Types sorted by amount; the first decides the row's group. */
+      typeList: Object.entries(r.types).sort((a, b) => b[1] - a[1]).map(([t]) => t),
+    }))
     .filter((r) => r.total > 0);
 }
-
+ 
 function renderRecipients() {
   const { key, dir } = recipientSort;
   const sizeOk = (total) =>
     recipientView.size === "all" ||
     (recipientView.size === "small" && total < 50000) ||
-    (recipientView.size === "medium" && total >= 50000 && total <= 250000) ||
-    (recipientView.size === "large" && total > 250000);
+    (recipientView.size === "medium" && total >= 50000 && total < 250000) ||
+    (recipientView.size === "large" && total >= 250000 && total < 500000) ||
+    (recipientView.size === "xl" && total >= 500000);
+  const groupOk = (r) =>
+    recipientView.group === "all" ||
+    r.typeList.some((t) => SPEND_TYPES[t]?.group === recipientView.group);
   const rows = recipientRows()
-    .filter((r) => sizeOk(r.total))
+    .filter((r) => sizeOk(r.total) && groupOk(r))
     .sort((a, b) =>
-      key === "name" ? a.name.localeCompare(b.name) * dir : (a[key] - b[key]) * dir,
+      key === "name"
+        ? a.name.localeCompare(b.name) * dir
+        : key === "type"
+          ? a.typeList[0].localeCompare(b.typeList[0]) * dir
+          : (a[key] - b[key]) * dir,
     );
   const totalPaid = rows.reduce((s, r) => s + r.paid, 0);
   const totalFuture = rows.reduce((s, r) => s + r.future, 0);
+ 
+  /* Paid split by type for the rows shown. */
+  const byType = {};
+  for (const r of rows) {
+    for (const [type, amount] of Object.entries(r.types)) {
+      byType[type] = (byType[type] || 0) + amount;
+    }
+  }
+  const mix = Object.entries(SPEND_TYPES)
+    .map(([type, meta]) => ({ ...meta, value: byType[type] || 0 }))
+    .filter((m) => m.value > 0);
+  const mixTotal = mix.reduce((s, m) => s + m.value, 0);
+ 
   const group = (label, attr, options, current) => `
     <div><span class="control-label">${label}</span>
       <div class="segmented" role="group" aria-label="${label}">
@@ -1560,46 +1664,63 @@ function renderRecipients() {
           aria-pressed="${v === current}">${text}</button>`).join("")}
       </div></div>`;
   const head = [
-    ["name", "Recipient"], ["paid", "Paid out"],
-    ["future", "Future milestones"], ["total", "Total"],
+    ["name", "Recipient"], ["type", "Type"], ["paid", "Paid out"],
+    ["future", "Future commitments"], ["total", "Total"],
   ].map(([k, label]) => {
     const selected = k === key;
-    return `<th scope="col" class="${k === "name" ? "" : "number"}"
+    return `<th scope="col" class="${["name", "type"].includes(k) ? "" : "number"}"
       aria-sort="${selected ? (dir > 0 ? "ascending" : "descending") : "none"}">
       <button data-recipient-sort="${k}">${label}${selected ? (dir > 0 ? " ↑" : " ↓") : ""}</button></th>`;
   }).join("");
-
+  const typeBadges = (r) =>
+    r.typeList
+      .map((t) => `<span class="type-tag"><span class="dot" style="background:${SPEND_TYPES[t].color}"></span>${SPEND_TYPES[t].label}</span>`)
+      .join(" ");
+ 
   $("recipientsContent").innerHTML = `
     <article class="card">
       <div class="control-bar">
         ${group("Period", "recipient-range", RECIPIENT_RANGES, recipientView.range)}
+        ${group("Type", "recipient-group", RECIPIENT_GROUPS, recipientView.group)}
         ${group("Recipient size", "recipient-size", RECIPIENT_SIZES, recipientView.size)}
       </div>
       <div class="table-summary">
         <div><strong>${usd(totalPaid)}</strong><span>Paid out</span></div>
-        <div><strong>${usd(totalFuture)}</strong><span>Future milestones</span></div>
+        <div><strong>${usd(totalFuture)}</strong><span>Future commitments</span></div>
         <div><strong>${rows.length}</strong><span>Recipients</span></div>
       </div>
+      ${mixTotal ? `
+        <div class="mix">
+          ${bar(mix.map((m) => ({ value: m.value, className: "", style: `background:${m.color}` })))}
+          <div class="mix-legend">
+            ${mix.map((m) => `<span><span class="dot" style="background:${m.color}"></span>
+              ${m.label} <strong>${usd(m.value)}</strong>
+              <span class="muted">${((m.value / mixTotal) * 100).toFixed(0)}%</span></span>`).join("")}
+          </div>
+        </div>` : ""}
       <div class="table-scroll">
         <table>
           <thead><tr>${head}</tr></thead>
           <tbody>${rows.length ? rows.map((r) => `<tr>
             <td>${escapeHTML(r.name)}</td>
+            <td>${typeBadges(r)}</td>
             <td class="number">${usd(r.paid)}</td>
-            <td class="number">${usd(r.future)}</td>
+            <td class="number">${r.future ? usd(r.future) : '<span class="muted">—</span>'}</td>
             <td class="number"><strong>${usd(r.total)}</strong></td></tr>`).join("")
-            : '<tr><td colspan="4" class="empty">No recipients match.</td></tr>'}</tbody>
+            : '<tr><td colspan="5" class="empty">No recipients match.</td></tr>'}</tbody>
         </table>
       </div>
       <p class="spark-caption" style="margin-top:14px">
+        Includes grant milestones, security (audits & bounties), event sponsorships,
+        committee stipends (combined), notetaker and other contractor/discretionary
+        payments. The type bar shows paid + future for the rows listed.
         Size filters use each recipient's total in the selected period.
-        "All time" uses the Funds Distribution sheet. Shorter periods are summed
-        from dated grant, contractor, stipend and discretionary budget payouts.
-        Future milestones are not time-limited.
+        Future commitments (unpaid milestones, upcoming events) are not time-limited.
+        ${events ? "" : "Events are still loading."}
       </p>
     </article>`;
 }
-
+ 
 /* ========================================================================
  * Grants page
  * ===================================================================== */
@@ -1610,7 +1731,7 @@ function renderGrantsMini() {
     g
       ? `<a href="#grants?grant=${encodeURIComponent(g.id)}">${escapeHTML(text)}</a>`
       : escapeHTML(text);
-
+ 
   const latest = [...data.approvals]
     .sort((a, b) => +date(b.date) - +date(a.date))
     .slice(0, MINI_COUNT)
@@ -1619,7 +1740,7 @@ function renderGrantsMini() {
         <small>${escapeHTML(a.grantee)} · ${fmtDate(a.date)}</small></div>
         <span class="amount">${usd(data.totals[norm(a.project)] || 0)}</span></li>`,
     );
-
+ 
   const recent = data.payouts
     .filter((p) => p.kind === "grant")
     .sort((a, b) => +date(b.date) - +date(a.date))
@@ -1629,7 +1750,7 @@ function renderGrantsMini() {
         <small>${escapeHTML(p.name)} · ${fmtDate(p.date)}</small></div>
         <span class="amount">${usd(p.amount)}</span></li>`,
     );
-
+ 
   /* Last 30 days stats */
   const now = new Date();
   const end = new Date(+now + 1);
@@ -1645,7 +1766,7 @@ function renderGrantsMini() {
   );
   const paid30 = sumBetween(grantPayouts, start30, end);
   const milestones30 = countBetween(grantPayouts, start30, end);
-
+ 
   const card = (title, items) => `<article class="card mini-card">
     <h2>${title}</h2>
     <ul class="mini-list">${items.join("") || '<li class="muted">No data</li>'}</ul>
@@ -1659,16 +1780,16 @@ function renderGrantsMini() {
     ${stat("Funding allocated to new grants", usd(allocated))}
     ${stat("Avg milestone payout", usd(milestones30 ? paid30 / milestones30 : 0))}
   </article>`;
-
+ 
   $("grantsMini").innerHTML =
     card("Latest approvals", latest) +
     card("Recent payouts", recent) +
     statsCard;
 }
-
+ 
 function renderGrants() {
   renderGrantsMini();
-
+ 
   const category = $("grantCategory").value;
   const categories = [...new Set(data.grants.map((g) => g.category))]
     .filter(Boolean)
@@ -1686,13 +1807,13 @@ function renderGrants() {
   if (categories.includes(requestedCategory)) {
     $("grantCategory").value = requestedCategory;
   }
-
+ 
   const query = norm($("grantSearch").value);
   const status = $("grantStatus").value;
   const budget = $("grantBudget").value;
   const selectedCategory = $("grantCategory").value;
   const sort = $("grantSort").value;
-
+ 
   const filtered = data.grants.filter((grant) => {
     const approved = grant.decision === "approved";
     if (["discussion", "rejected"].includes(status)) {
@@ -1714,7 +1835,7 @@ function renderGrants() {
     if (budget === "large" && grant.total <= 200000) return false;
     return selectedCategory === "all" || grant.category === selectedCategory;
   });
-
+ 
   filtered.sort((a, b) => {
     if (sort === "biggest") return b.total - a.total;
     if (sort === "smallest") return a.total - b.total;
@@ -1722,7 +1843,7 @@ function renderGrants() {
     const db = +(date(b.lastPaid || b.submitted) || 0);
     return sort === "oldest" ? da - db : db - da;
   });
-
+ 
   $("grantCount").textContent =
     `${filtered.length} shown · ${data.grants.length} total tracked records`;
     $("grantsContainer").innerHTML = filtered.length
@@ -1731,7 +1852,7 @@ function renderGrants() {
           const paidPercent = grant.total
             ? Math.min(100, Math.max(0, (grant.paid / grant.total) * 100))
             : 0;
-
+ 
           // 100% = complete green, >= 75% = medium green, default = yellow
           const ringClass =
             paidPercent >= 100
@@ -1739,7 +1860,7 @@ function renderGrants() {
               : paidPercent >= 75
                 ? "ring-mid"
                 : "";
-
+ 
           const next = nextMilestone(grant);
           const due = next?.estimate || next?.due;
           const label =
@@ -1789,7 +1910,7 @@ function renderGrants() {
     : '<div class="card empty">No grants match these filters.</div>';
   syncDropdowns();
 }
-
+ 
 function updateGrantURL() {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   for (const [name, id, defaultValue] of [
@@ -1804,7 +1925,7 @@ function updateGrantURL() {
   const text = params.toString();
   history.replaceState(null, "", `#grants${text ? `?${text}` : ""}`);
 }
-
+ 
 /* ========================================================================
  * Grant dialog (native <dialog> handles focus containment)
  * ===================================================================== */
@@ -1815,7 +1936,7 @@ function openGrantFromHash() {
   const grant = data.grants.find((item) => item.id === id);
   if (grant && $("grantDialog").dataset.grant !== id) showGrant(grant);
 }
-
+ 
 async function showGrant(grant) {
   const request = ++modalRequest;
   const dialog = $("grantDialog");
@@ -1823,7 +1944,7 @@ async function showGrant(grant) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   params.set("grant", grant.id);
   history.replaceState(null, "", `#grants?${params}`);
-
+ 
   const remaining = Math.max(grant.total - grant.paid, 0);
   const segments = grant.milestones.map((milestone) => ({
     value: milestone.amount,
@@ -1928,7 +2049,7 @@ async function showGrant(grant) {
       $("shareGrant").textContent = "Copy this page’s URL from your browser";
     }
   };
-
+ 
   try {
     const key = `zcg-github-v2:${grant.project}`;
     const cached = readCache(key);
@@ -1973,7 +2094,7 @@ async function showGrant(grant) {
     }
   }
 }
-
+ 
 function extractSummary(markdown) {
   const lines = markdown.split("\n");
   const start = lines.findIndex((line) =>
@@ -1988,7 +2109,7 @@ function extractSummary(markdown) {
   const text = output.join("\n").replace(/[#*`]/g, "").trim();
   return text.length > 1200 ? `${text.slice(0, 1200)}…` : text;
 }
-
+ 
 function clearModalURL() {
   modalRequest++;
   $("grantDialog").dataset.grant = "";
@@ -1998,7 +2119,7 @@ function clearModalURL() {
   const text = params.toString();
   history.replaceState(null, "", `#grants${text ? `?${text}` : ""}`);
 }
-
+ 
 /* ========================================================================
  * Security page: chart on the existing canvas + searchable table
  * ===================================================================== */
@@ -2023,7 +2144,7 @@ function renderSecurity() {
       ),
     }))
     .filter((d) => d.data.some(Boolean));
-
+ 
   makeChart("securityChart", {
     type: "bar",
     data: { labels: keys, datasets },
@@ -2044,13 +2165,13 @@ function renderSecurity() {
   });
   renderTable("security");
 }
-
+ 
 /* ========================================================================
  * Shared pages: stipends / notetaker / events (top stats + chart + table)
  * ===================================================================== */
 const NUMERIC_FORMATS = ["usd", "zec", "rate"];
 const DATE_FORMATS = ["date", "datelabel"];
-
+ 
 function tableConfig(type) {
   const isNotes = (row) => NOTES_TEXT.test(row.project);
   if (type === "stipends") {
@@ -2113,7 +2234,7 @@ function tableConfig(type) {
     ],
   };
 }
-
+ 
 function chartCard(type, title, caption) {
   return `<article class="card" style="margin-bottom:16px">
     <div class="card-heading"><div>
@@ -2122,11 +2243,11 @@ function chartCard(type, title, caption) {
     <div class="chart-wrap"><canvas id="${type}Chart"></canvas></div>
   </article>`;
 }
-
+ 
 function pageTop(type, config) {
   const keys = months(12);
   const monthsElapsed = new Date().getMonth() + 1;
-
+ 
   if (type === "stipends") {
     const rows = ytdRows(config.rows);
     const byMember = new Map();
@@ -2165,7 +2286,7 @@ function pageTop(type, config) {
       </div>
       ${chartCard("stipends", "Monthly stipend payments", "USD paid per month · last 12 months")}`;
   }
-
+ 
   if (type === "notetaker") {
     const values = monthly(config.rows, keys, "usd");
     const firstIndex = values.findIndex((v) => v > 0);
@@ -2192,7 +2313,7 @@ function pageTop(type, config) {
       </div>
       ${chartCard("notetaker", "Monthly notetaker payments", "USD paid per month · last 12 months")}`;
   }
-
+ 
   if (type === "events") {
     const all = config.rows;
     const done = all.filter((e) => e.status === "done");
@@ -2233,7 +2354,7 @@ function pageTop(type, config) {
   }
   return "";
 }
-
+ 
 function drawTableChart(type, config) {
   const colors = chartColors();
   const keys = months(12);
@@ -2242,7 +2363,7 @@ function drawTableChart(type, config) {
     callbacks: { label: (c) => `${c.dataset.label}: ${usd(c.raw)}` },
   };
   const yAxis = { ticks: { color: colors.text, callback: (v) => usd(v) } };
-
+ 
   if (type === "events") {
     const done = config.rows.filter((e) => e.status === "done" && e.date);
     const types = [
@@ -2292,7 +2413,7 @@ function drawTableChart(type, config) {
     },
   });
 }
-
+ 
 function renderTable(type) {
   const config = tableConfig(type);
   const state = tableStates.get(type) || {
@@ -2335,7 +2456,7 @@ function renderTable(type) {
   if (hasChart) drawTableChart(type, config);
   updateTable(type);
 }
-
+ 
 function updateTable(type) {
   const config = tableConfig(type);
   const state = tableStates.get(type);
@@ -2354,7 +2475,7 @@ function updateTable(type) {
         .join(" "),
     ).includes(query),
   );
-
+ 
   rows.sort((a, b) => {
     const column = config.columns.find(([key]) => key === state.sort);
     const isDate = DATE_FORMATS.includes(column?.[2]);
@@ -2367,10 +2488,10 @@ function updateTable(type) {
       state.direction
     );
   });
-
+ 
   const sumOf = (list, field) =>
     list.reduce((sum, row) => sum + (row[field] || 0), 0);
-
+ 
   if (config.tiles) {
     const ytd = ytdRows(config.rows);
     $(`${type}Summary`).innerHTML = `
@@ -2384,10 +2505,10 @@ function updateTable(type) {
   } else {
     $(`${type}Summary`).innerHTML = "";
   }
-
+ 
   $(`${type}Count`).textContent =
     `${rows.length} of ${config.rows.length} records shown`;
-
+ 
   const formatCell = (value, format, row) => {
     if (format === "date") return fmtDate(value);
     if (format === "datelabel") return escapeHTML(row.dateLabel || "—");
@@ -2424,7 +2545,7 @@ function updateTable(type) {
   $(`${type}Totals`).textContent = config.hasZec
     ? `Totals for rows shown: ${usd(sumOf(rows, "usd"))} · ${zec(sumOf(rows, "zec"))}`
     : `Total for rows shown: ${usd(sumOf(rows, "usd"))}`;
-
+ 
   $(config.target)
     .querySelectorAll("[data-column]")
     .forEach((header) => {
@@ -2440,7 +2561,7 @@ function updateTable(type) {
         : "";
     });
 }
-
+ 
 /* ========================================================================
  * Liquidity: live Maya position, with sheet fallback
  * ===================================================================== */
@@ -2449,7 +2570,7 @@ async function getJSON(url) {
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
   return response.json();
 }
-
+ 
 async function fetchMaya() {
   const [member, pool] = await Promise.all([
     getJSON(`${MIDGARD}/member/${MAYA_ADDRESS}`),
@@ -2485,7 +2606,7 @@ async function fetchMaya() {
     vsEntry: value - ENTRY_USD,
   };
 }
-
+ 
 function drawLiquidity(m, timestamp = Date.now()) {
   const pct = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
   const cacao = (v) =>
@@ -2518,7 +2639,7 @@ function drawLiquidity(m, timestamp = Date.now()) {
       ${stat("CACAO price", "$" + m.cacaoUsd.toFixed(3))}
     </article>`;
 }
-
+ 
 function drawSheetLiquidity() {
   const metrics = new Map();
   let contributions = 0;
@@ -2554,7 +2675,7 @@ function drawSheetLiquidity() {
     )
     .join("");
 }
-
+ 
 async function renderLiquidity() {
   if (mayaLoading) return;
   const cached = readCache(MAYA_KEY);
@@ -2582,7 +2703,7 @@ async function renderLiquidity() {
     mayaLoading = false;
   }
 }
-
+ 
 /* ========================================================================
  * Events & init
  * ===================================================================== */
@@ -2598,7 +2719,7 @@ function applyTheme(theme, persist = true) {
     `Switch to ${theme === "dark" ? "light" : "dark"} mode`,
   );
 }
-
+ 
 $("refreshButton").addEventListener("click", refreshData);
 $("themeToggle").addEventListener("click", () => {
   const theme =
@@ -2608,7 +2729,7 @@ $("themeToggle").addEventListener("click", () => {
   renderedPages.clear();
   renderActivePage();
 });
-
+ 
 $("grantSearch").addEventListener(
   "input",
   debounce(() => {
@@ -2627,7 +2748,7 @@ $("grantsContainer").addEventListener("click", (event) => {
   const grant = data.grants.find((item) => item.id === button.dataset.grant);
   if (grant) showGrant(grant);
 });
-
+ 
 document.addEventListener(
   "input",
   debounce((event) => {
@@ -2637,7 +2758,7 @@ document.addEventListener(
     updateTable(type);
   }),
 );
-
+ 
 document.addEventListener("click", (event) => {
   const tableSort = event.target.closest("[data-table-sort]");
   if (tableSort) {
@@ -2655,6 +2776,12 @@ document.addEventListener("click", (event) => {
     renderRecipients();
     return;
   }
+  const groupBtn = event.target.closest("[data-recipient-group]");
+  if (groupBtn && data) {
+    recipientView.group = groupBtn.dataset.recipientGroup;
+    renderRecipients();
+    return;
+  }
   const sizeBtn = event.target.closest("[data-recipient-size]");
   if (sizeBtn && data) {
     recipientView.size = sizeBtn.dataset.recipientSize;
@@ -2665,9 +2792,10 @@ document.addEventListener("click", (event) => {
   if (recipientButton && data) {
     const k = recipientButton.dataset.recipientSort;
     recipientSort.dir =
-      recipientSort.key === k ? -recipientSort.dir : k === "name" ? 1 : -1;
+      recipientSort.key === k ? -recipientSort.dir : ["name", "type"].includes(k) ? 1 : -1;
     recipientSort.key = k;
     renderRecipients();
+    return;
   }
   const payoutBtn = event.target.closest("[data-payout-range]");
   if (payoutBtn && data) {
@@ -2678,7 +2806,7 @@ document.addEventListener("click", (event) => {
     renderOverviewCharts();
     return;
   }
-
+ 
   const approvalBtn = event.target.closest("[data-approval-range]");
   if (approvalBtn && data) {
     chartRanges.approval = approvalBtn.dataset.approvalRange;
@@ -2689,7 +2817,7 @@ document.addEventListener("click", (event) => {
     return;
   }
 });
-
+ 
 $("closeDialog").addEventListener("click", () => $("grantDialog").close());
 $("grantDialog").addEventListener("close", clearModalURL);
 $("grantDialog").addEventListener("click", (event) => {
@@ -2705,7 +2833,7 @@ $("grantDialog").addEventListener("click", (event) => {
   }
 });
 window.addEventListener("hashchange", route);
-
+ 
 /* ========================================================================
  * Custom dropdowns (native <select> stays hidden and keeps working)
  * ===================================================================== */
@@ -2715,11 +2843,11 @@ function closeMenus() {
     menu.previousElementSibling.setAttribute("aria-expanded", "false");
   });
 }
-
+ 
 function syncDropdowns() {
   document.querySelectorAll("select").forEach((s) => s._sync?.());
 }
-
+ 
 function enhanceSelect(select) {
   if (select.dataset.enhanced) return;
   select.dataset.enhanced = "1";
@@ -2738,18 +2866,18 @@ function enhanceSelect(select) {
   menu.hidden = true;
   select.after(wrap);
   wrap.append(select, button, menu);
-
+ 
   const sync = () => {
     button.textContent = select.selectedOptions[0]?.textContent || "";
     menu.innerHTML = [...select.options]
-      .map((o) => `<button type="button" class="button" role="option" class="dropdown-option"
+      .map((o) => `<button type="button" role="option" class="dropdown-option"
         data-value="${escapeHTML(o.value)}" aria-selected="${o.selected}">
         ${escapeHTML(o.textContent)}</button>`)
       .join("");
   };
   select._sync = sync;
   sync();
-
+ 
   button.addEventListener("click", () => {
     const wasOpen = !menu.hidden;
     closeMenus();
@@ -2767,7 +2895,7 @@ function enhanceSelect(select) {
     closeMenus();
   });
 }
-
+ 
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".dropdown")) closeMenus();
 });
@@ -2775,7 +2903,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeMenus();
 });
 document.querySelectorAll("select").forEach(enhanceSelect);
-
+ 
 /* Boot */
 applyTheme(document.documentElement.dataset.theme || "light", false);
 const cached = readCache(CACHE_KEY);
@@ -2783,7 +2911,7 @@ if (
   cached?.value?.grants &&
   cached.value.treasury &&
   cached.value.security &&
-  cached.value.recipients
+  cached.value.budget
 ) {
   data = cached.value;
 }
@@ -2797,3 +2925,4 @@ if (!data || Date.now() - cached.timestamp > CACHE_TTL) refreshData();
 else if (!events || Date.now() - cachedEvents.timestamp > CACHE_TTL) {
   loadEvents();
 }
+ 
