@@ -1230,6 +1230,24 @@ footer {
 .mix-legend strong {
   font-weight: 620;
 }
+.mix-legend + .mix-legend {
+  margin-top: 8px;
+}
+.mix-legend:has(.mix-group) {
+  position: relative;
+  padding-left: 100px;
+}
+.mix-group {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  min-width: 86px;
+}
 
 /* Mini charts on overview cards */
 .spark-title { margin-top: 18px; font-size: 12px; font-weight: 620; }
@@ -1242,3 +1260,8 @@ dialog {
   overscroll-behavior: contain;
 }
 dialog::-webkit-scrollbar { display: none; }
+
+@media (max-width: 700px) {
+  .mix-legend:has(.mix-group) { padding-left: 0; }
+  .mix-group { position: static; width: 100%; }
+}
