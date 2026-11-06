@@ -35,16 +35,15 @@ let dailyPrices = null; // Map of "YYYY-MM-DD" -> ZEC/USD, once loaded
 const DAY = 86400000;
 const DAILY_INFLOW_ZEC = 144;
 const MINI_COUNT = 5;
-const CACHE_KEY = "zcg-dashboard-v11";
+const CACHE_KEY = "zcg-dashboard-v12"; // bump whenever buildData() output changes
 const MIN_MONTH = "2021-01"; // no data before this
 const recipientView = { range: "all", size: "all", group: "all" };
 const STIPEND_RECIPIENT = "ZCG Committee (stipends)";
 /* Confirmed same-recipient spellings that the automatic rule won't merge.
  * Keys and values are lowercase, without a leading "@". Example:
- *   "zknd3r": "zk-nd3r",
+ *   "zknd3r": "Zk-nd3r",
  */
-const RECIPIENT_ALIASES = {};
- 
+const RECIPIENT_ALIASES = { "zknd3r": "zk-nd3r" };
 /* Spending types used by the recipients table and the Payouts card.
  * Colors are mid-tones that read in both light and dark mode. */
 const SPEND_TYPES = {
